@@ -80,8 +80,8 @@ tree. Citations are relative to that tree.
    no loop and no runtime recursion, and its domain is the word.
 2. A restricted assay dialect checked by the assay kernel: possible. The
    kernel admits indexed mu families, Pi, Sigma, sums, products and
-   universes, and it erases quantity-0 terms. Not yet run on
-   `examples/m1-spine.kan`.
+   universes, and it erases quantity-0 terms. It checks
+   `examples/m1-spine.kan` (P2). Generic families are limited (P2).
 3. A separate front end that imports assay: not possible. A front end that
    writes `.asy` text and runs the CLI is possible.
 
@@ -99,12 +99,153 @@ tree. Citations are relative to that tree.
 - No assay operation sends value. Design open item O7 (no outflow) is also
   a limit of the target.
 
-## Open probe items for M0 and M1
+## M0 probe results (2026-10-06)
 
-- P1. Confirm that a runtime `le` branch can lead to two continuations that
-  write different storage. `settle` needs a three-way split at runtime.
-- P2. Check `examples/m1-spine.kan` and a scratch prelude with `Eq` in
-  `Type 0`, `transport`, `symm`, `trans` and `cong` by fibered `match`.
-- P3. Find how `check --print` shows normal forms, so the compiler can
-  tabulate `L` and evaluate test scenarios with the assay kernel.
-- P4. Measure the kernel step limit on `fold` over a `List` of 100 ballots.
+Build: assay HEAD = PIN 092fa7a, but `_build/bend/assay.js` was built
+2026-10-05 23:36, after three staged src edits (frontend.bend 1 line,
+return_abi.bend 1 line, tests.bend +9 -3). The results are for PIN plus
+those edits, not PIN exactly. The assay staged count stayed 56.
+
+Runner: `zsh probe/run.sh LABEL VERB ARGS..`. It sets `NODE_COMPILE_CACHE`
+to `$TMPDIR/escrow-probe`, caps the V8 heap at 3 GB, kills the run above
+4 GB RSS and prints the wall time and the peak RSS (measured inside node).
+
+### P1. A runtime `le` branch with writing continuations: PASS
+
+`probe/p1-le-branch.asy`: `split2` is one `le` with two writing branches.
+`split3` is a nested `le` with three slots.
+
+| Command | Result | Wall s | RSS MB |
+|---|---|---|---|
+| `check probe/p1-le-branch.asy` | ok | 0.23 | 83 |
+| `axioms probe/p1-le-branch.asy` | `EvmOpcodes` | 0.67 | 81 |
+| `emit probe/p1-le-branch.asy -o NEWDIR` | abi.json, axioms.txt, init.hex, layout.json, runtime.hex | 0.32 | 123 |
+| `axioms examples/CounterSurface.asy` | `EvmOpcodes` | 0.25 | 87 |
+| `run` split2(2,5) | output 1, storage {0: 2} | 0.37 | 116 |
+| `run` split2(5,2) | output 2, storage {1: 2} | 0.35 | 125 |
+| `run` split3(3,3) | output 3, storage {2: 3} | 0.71 | 94 |
+| `run` split3(2,5) | output 1, storage {0: 2} | 1.95 | 114 |
+| `run` split3(5,2) | output 2, storage {1: 2} | 0.57 | 120 |
+
+Calldata: `cast calldata 'split2(uint256,uint256)' 2 5` (and so on). `run`
+prints the storage, so `trace` is not necessary. `trace` on the five paths:
+exit 0, 0.48 to 1.02 s, 123 to 132 MB, one SSTORE at the expected slot.
+`emit` refuses a directory that exists ("use a new directory under an
+existing parent"). The assay example CounterSurface also reports
+`EvmOpcodes`: the marker is part of the assay core protocol.
+
+### P2. Equality by fibered match: PASS only with a fixed index type
+
+- `check examples/m1-spine.kan`: ok, 0.58 s, 113 MB. Its families have no
+  parameters (lines 259 to 326).
+- A constructor of a family with a parameter cannot appear in a term.
+  `box 3`, `(box 3 : Box Nat)`, `id (Box Nat) (box 3)` and a bare `refl`
+  against `Eq Nat 2 2` give "cannot infer: the constructor box needs an
+  expected type". `box Nat 3` gives "box takes 1 arguments and the term
+  gives 2". A bare `box` against `A -> Box A` gives "takes 1 arguments and
+  the term gives 0". A `match` on such a family checks (`in Box`, pattern
+  `box a`).
+- A family with a type index (`Eq : (0 A : Type 0) -> (0 a : A) -> (0 b :
+  A) -> ..`) is refused in `Type 0` ("index above universe: the index A of
+  Eq lives at 2 and Eq is declared at 1") and accepted in `Type 1`. Its
+  constructors take the type: `refl Nat 2`, `cons Nat 1 (nil Nat)`. A
+  `match` binds the type index again (`in Eq B i j`, pattern `refl 0 C 0
+  z`), so a branch cannot apply a function on the outer `A` to a
+  pattern-bound value. `symm` and `length` check; `transport`, `cong`,
+  `map` and `fold` cannot be written.
+- `probe/p2-eq.asy`: `EqNat` and `EqDec`, each with a fixed index type in
+  `Type 0`; `transportNat`, `symmNat`, `transNat` (by transport),
+  `congNat`, `congND` (Nat to Decision) and six uses through `natAdd`,
+  `natSub`, `natLt` and beta. `check`: ok, 0.19 s, 87 MB. `axioms`: none,
+  0.61 s, 88 MB.
+- Other syntax facts: `fun (x : A) (y : B) => t` takes several binders;
+  `def` takes no parameters (`def NAME :`, `def rec NAME :`, `axiom`, `mu`,
+  `mutual`); `prod`/`tuple` projections count from 0 (`t.0`, `t.1.0`);
+  Sigma projections are `s.1` and `s.2`; `inj 1 of 2 5` checks against
+  `sum (Nat, Nat)`; a nullary constructor of a family without parameters
+  checks bare.
+
+### P3. Normal forms: `--print` and `--erased` do not show them
+
+- `check --print probe/p3-print.asy` (0.16 s, 78 MB) prints the elaborated
+  core term: `def y : Nat := (Out SPi w _ Nat (APt w 41) f)`.
+- `check --erased probe/p3-print.asy` (0.14 s, 78 MB) prints the erased
+  code: `fun y () : union nat := KTail (KGlobal f) [KLit 41]`.
+- Fallback, `probe/p3-refl.asy`: `def cy : EqNat y 42 := reflNat 42` and
+  three more correct candidates. `check`: ok, 0.15 s, 78 MB. A wrong
+  candidate (`reflNat 41`) fails in 0.70 s, 78 MB, with "mismatch: the
+  constructor reflNat of EqNat gives the index 41 and the type asks for
+  42". The message prints the normal form. Thus one check with a sentinel
+  candidate reads one value, and one check of all candidates confirms a
+  table.
+
+### P4. Fold over a list of N ballots: no step limit hit
+
+`zsh probe/p4-gen.sh N > FILE` writes `Decision`, a `Ballots` list family,
+`def rec foldBallots`, a tally `bump`, a chain of N list definitions and a
+`reflT3` candidate for the tally. `probe/p4-fold-100.asy` is N = 100.
+
+| N | `check` wall s | RSS MB |
+|---|---|---|
+| 100 | 0.41 | 121 |
+| 1000 | 23.82 | 165 |
+| 4000 | 121.86 | 393 |
+
+`axioms` on N = 100: none, 1.39 s, 115 MB. The time grows faster than N
+(N times 10 gives time times 58).
+
+### Consequence for the prelude (SPEC open item O8)
+
+`Eq A x y`, `List A` and `Option A` cannot be `mu` families with a type
+argument that the operations can use. Proposal: one equality family per
+index type (`EqNat`, `EqDec`, `EqTally`), one list family per element type
+(`Ballots`, `Claims`), and `Option A` and `Sum A B` as type functions over
+the built-in `sum`, which stay generic.
+
+## M0 prelude and examples (2026-10-06)
+
+Gate: `zsh prelude/assemble.sh --members 3` plus a check of each prefix of
+`prelude/Prelude.asy` (one prefix per `-- @section`, stop at the first
+failure), then `axioms`, then each example by `zsh prelude/assemble.sh
+examples/programs/NAME.asy > examples/NAME.asy`. Wall times are on a loaded
+box. The assay staged count was 56 before and after.
+
+| Command | Result | Wall s | RSS MB |
+|---|---|---|---|
+| `check` prefixes 1 to 8 (members 3) | ok, each | 0.96 to 15.12 | 73 to 118 |
+| `axioms` full prelude | no output (no axiom) | 2.36 | 112 |
+| `check examples/arrow-impossibility.asy` | ok | 10.95 | 99 |
+| `axioms examples/arrow-impossibility.asy` | no output | 4.19 | 110 |
+| `check examples/arrow-debreu.asy` | ok | 36.45 | 118 |
+| `axioms examples/arrow-debreu.asy` | no output | 7.86 | 149 |
+| mutant: `payeeAfterSettle` claims 4 | refused: "the constructor reflNat of EqNat gives the index 4 and the type asks for 5" | 10.18 | 140 |
+
+Scenario checks (refl candidates in the examples):
+- arrow-impossibility: after `deposit 1 2 5`, balance 1 = 5, balance 2 = 0,
+  one claim. `x` and `y` are in one orbit (`reflTally`), and `first x =
+  release`, `first y = refund`: the constitution is not orbit-constant.
+- arrow-debreu: verdict of `x` = release, `castOrbit` on `x` and `y`,
+  `homAmend`, `reconstitute`, `selfConstitutes`; after `deposit 1 2 5`
+  then `settle`, balance 1 = 0, balance 2 = 5, and one claim stays (O4).
+
+Probe-forced changes found in M0:
+- P5, `probe/p5-sigma-eta.asy`: `fun (s : S) => (s.1, s.2)` with `S := (n
+  : Nat) * EqNat n 3` fails: "the term has type (EqNat [(Elim SPi w n Nat s
+  with ..); 3]) and the expected type is (EqNat [(Elim SPi w n Nat s as self
+  return Nat with ..); 3])". The type of `s.2` holds a projection without
+  the return annotation. A written `s.1` holds one with it. Conversion does
+  not identify them. Forms tried for a Sigma pattern: `match x as q in
+  Config return Tally with | (xs, e) => ..`, `match x as q return ..`,
+  `match x with ..`, `case x with | (xs, e) => ..` ("expected a leg number
+  or a constructor name after '|'"), `let (xs, e) := x in ..` ("expected a
+  name and ':' after 'let'"), `let (xs, e) = x in ..`. A literal Sigma
+  binder type, a curried helper `orbitOf x.1 x.2` and an ascription
+  `(x.2 : ..)` give the same mismatch. Consequence: `Config`, `Tally` and
+  `Aggregation F` are `mu` records read by `match` (SPEC O10).
+- A `mu` family with an index of a function type (`Aggregation : (0 F :
+  ChoiceRule) -> Type 0`) checks in `Type 0`; `mkAgg F L p` takes `F`
+  explicitly, and `match L as q in Aggregation G return .. with | mkAgg 0 G
+  l p => ..` reads it.
+- `tuple ()` is the value of `prod ()`; `inj 0 of 2 (tuple ())` checks
+  against `Option A`.
+- `unfold` is not written: no structural measure, no `Nat` fuel (SPEC O9).

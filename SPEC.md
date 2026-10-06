@@ -42,29 +42,42 @@ contract; a program cannot.
 
 ## 3. Type formers
 
-The same formers as ledger-lang `SPEC.md` section 3:
+The formers of ledger-lang `SPEC.md` section 3, in the assay forms that the
+prelude (`prelude/Prelude.asy`) uses. USER ruling 2026-10-06 (O8) fixes the
+equality and list rows.
 
 | Type former | Forms |
 |---|---|
 | Core types | Section 4 of this file, and `Nat` |
-| Product | `Prod A B`, `pair`, `first`, `second` |
-| Coproduct | `Sum A B`, `inl`, `inr`, `either` |
-| Universal quantification | `(x : A) -> B`, `fun (x : A) => t`, application |
-| Existential quantification | `Sigma A B`, `pack`, `witness`, `payload` |
-| Type equality | `Eq A x y`, `refl`, `transport`, `symm`, `trans`, `cong` |
-| Universes | `Type 0`, `Type 1` |
+| Product | `prod (A, B)`, `tuple (a, b)`, `t.0`, `t.1` |
+| Coproduct | `Sum A B := sum (A, B)`, `inj k of 2 v`, `case` |
+| Universal quantification | `(x : A) -> B`, `fun (x : A) (y : B) => t`, application |
+| Existential quantification | `(x : A) * B`, `(a, b)` (built only, never projected, O10), or a `mu` record read by `match` |
+| Type equality | `EqNat`, `EqDec`, `EqTally`: each a `mu` family with a fixed index type in `Type 0`, with `refl*`, `transport*`, `symm*`, `trans*`, `cong*`, and `congND` (Nat to Decision), `congTD` (Tally to Decision) |
+| Universes | `Type 0` (`Type 1` only as the type of a type function) |
+
+A constructor of a family takes its index explicitly (`reflNat 2`). A family
+has no parameter: a constructor of a family with a parameter cannot appear
+in a term (probe P2).
 
 The same structures as ledger-lang `SPEC.md` section 4, with the carriers
 that the design uses:
 
-- **Monad**: `pure`, `map`, `bind` on `Option`, `List` and `Sum E`.
-- **Algebra**: `fold` and `unfold` on `Nat` and `List A`.
-- **Filterable**: `filter` on `Option` and `List`.
+- **Monad**: `pure*`, `map*`, `bind*` on `Option`, `Sum E`, `Ballots` and
+  `Claims`. `Option A := sum (prod (), A)` and `Sum A B := sum (A, B)` are
+  generic type functions. Each list is one `mu` family per element type, so
+  its `map` is an endomap and its `bind` stays in the family.
+- **Algebra**: `foldBallots` and `foldClaims` (`def rec`, structural). There
+  is no `unfold`: it has no structural measure (open item O9). Built-in
+  `Nat` has no eliminator, so there is no `fold` on `Nat` (probe-forced).
+- **Filterable**: `filterOption`, `filterBallots`, `filterClaims`. A test is
+  `A -> Option (prod ())`; leg 1 keeps, as leg 1 of `natEq` and `natLt` is
+  true.
 
 The ledger-lang carriers `Text`, `Values`, `Attrs` and `Value` are not types
-of the design, so escrow-lang does not have them. `List` is a type of the
-design (`claims : List Claim`). `Option` comes with the structures: `unfold`
-and `filter` need it. It is not a domain type.
+of the design, so escrow-lang does not have them. `Claims` is the list of
+the design (`claims : List Claim`). `Option` comes with the structures:
+`filter` needs it. It is not a domain type.
 
 One dependent form goes past the current ledger-lang build: a type that
 depends on a value. `Aggregation F` depends on the constitution `F`, and
@@ -77,27 +90,32 @@ Each core type is in `Type 0`. The meaning column cites the design.
 
 | Type | Meaning | Definition |
 |---|---|---|
-| `Nat` | the asset monoid `A` (pointwise N, section 2) and counts | primitive: `zero`, `succ`, `add` |
-| `Address` | a payer or a payee | primitive, no operations |
-| `Decision` | the discrete category `D` (section 2) | primitive: `release`, `refund`, `hold`, `decide r f h d` |
+| `Nat` | the asset monoid `A` (pointwise N, section 2) and counts | built-in: literals, `natAdd`, `natSub`, `natEq`, `natLt` |
+| `Address` | a payer or a payee | `Nat` (probe-forced: `credit` compares addresses with `natEq`) |
+| `Decision` | the discrete category `D` (section 2) | `mu`: `release`, `refund`, `hold`; `decide B r f h d` |
 | `Ballot` | the vote of one member | `Decision` |
-| `Config` | an object of `Obj`, one ballot per member | `Sigma (List Ballot) (fun xs => Eq Nat (length xs) members)` |
-| `Tally` | an orbit of `Obj` under member relabeling | `Sigma (Prod Nat (Prod Nat Nat)) (fun t => Eq Nat (total t) members)` |
-| `ChoiceRule` | `F : Obj => D` | `(x : Config) -> Decision` |
-| `Aggregation F` | `Aggregation act F` at discrete `D` (section 2) | `Sigma ((t : Tally) -> Decision) (fun L => (x : Config) -> Eq Decision (F x) (L (orbit x)))` |
-| `IsSelfConstituting F` | the fixed-point predicate (section 3) | `Sigma (Aggregation F) (fun L => (x : Config) -> Eq Decision (gov F L x) (F x))` |
-| `AmendmentRule` | `Phi` (section 3) | `(H : (t : Tally) -> Decision) -> ChoiceRule` |
-| `Claim` | the triple `(p, q, n)` | `Prod Address (Prod Address Nat)` |
-| `Ledger` | `Address -> A` with finite support | primitive: `empty`, `balance`, `credit`, `debit` |
-| `Escrow` | the escrow state `E` | `Prod Ledger (List Claim)` |
-| `EscrowDAO F` | the governed escrow `Sigma L. E` | `Sigma (Aggregation F) (fun L => Escrow)` |
+| `Ballots` | a list of ballots | `mu`: `bnil`, `bcons` |
+| `T3` | the count triple (release, refund, hold) | `prod (Nat, prod (Nat, Nat))` |
+| `Config` | an object of `Obj`, one ballot per member | `mu` record `mkConfig (xs : Ballots) (e : EqNat (total (tallyOf xs)) members)`; field `ballots` (probe-forced, O10) |
+| `Tally` | an orbit of `Obj` under member relabeling | `mu` record `mkTally (t : T3) (e : EqNat (total t) members)`; field `counts` (probe-forced, O10) |
+| `ChoiceRule` | `F : Obj => D` | `Config -> Decision` |
+| `Aggregation F` | `Aggregation act F` at discrete `D` (section 2) | `mu` family indexed by `F`: `mkAgg F L p` with `L : Tally -> Decision`, `p : (x : Config) -> EqDec (F x) (L (orbit x))`; field `rule F L` (probe-forced, O10) |
+| `IsSelfConstituting F` | the fixed-point predicate (section 3) | `(L : Aggregation F) * ((x : Config) -> EqDec (gov F L x) (F x))` |
+| `AmendmentRule` | `Phi` (section 3) | `(Tally -> Decision) -> ChoiceRule` |
+| `Claim` | the triple `(p, q, n)` | `prod (Address, prod (Address, Nat))` |
+| `Claims` | the claim list | `mu`: `cnil`, `ccons` |
+| `Ledger` | `Address -> A` with finite support | `Address -> Nat`: `empty`, `balance`, `credit`, `debit` |
+| `Escrow` | the escrow state `E` | `prod (Ledger, Claims)` |
+| `EscrowDAO F` | the governed escrow `Sigma L. E` | `(L : Aggregation F) * Escrow` |
 
-`Le n m` is the order of the monoid: `Sigma Nat (fun k => Eq Nat (add n k) m)`.
-`debit l p n` takes a proof of `Le n (balance l p)`. Subtraction in a
-cancellative monoid is defined only below the balance.
+`Le n m` is the order of the monoid: `(k : Nat) * EqNat (natAdd n k) m`.
+`debit l p n h` takes an erased proof `0 h : Le n (balance l p)`.
+Subtraction in a cancellative monoid is defined only below the balance.
 
-The prelude defines `length`, `total` and `orbit : Config -> Tally` with
-`fold`. `orbit` is the orbit projection. The member relabeling group is the
+The prelude defines `tallyOf` (by `foldBallots`), `total` and `orbit :
+Config -> Tally`. `Config` states `total (tallyOf xs) = members`, so
+`orbit` reuses that proof: `orbit (mkConfig xs e) = mkTally (tallyOf xs) e`. A proof of `total (tallyOf xs) = length xs` for an open `xs`
+is not possible: `natAdd` reduces only on literals (probe-forced). `orbit` is the orbit projection. The member relabeling group is the
 symmetric group on `members`. Its orbits are tallies. This choice of `act` is
 mine; the design keeps `act` abstract (open item O2).
 
@@ -113,11 +131,11 @@ Three facts follow, and the prelude states them:
 
 - `Aggregation F` has at most one inhabitant up to the values of `L`.
 - `IsSelfConstituting F` holds exactly when `Aggregation F` has an
-  inhabitant: `selfConstitutes F L := pack L (fun x => symm (payload L x))`.
+  inhabitant: `selfConstitutes F L := (L, fun x => symmDec (F x) (gov F L x) (cast F L x))`.
 - `Aggregation F` has an inhabitant exactly when `F` is constant on orbits.
 
 A constitution of the form `fun x => H (orbit x)` has the aggregation
-`pack H (fun x => refl)`. A constitution that reads a member position has no
+`mkAgg F H (fun x => reflDec (H (orbit x)))`. A constitution that reads a member position has no
 aggregation that a program can write. That program is in the
 Arrow-impossibility regime.
 
@@ -127,18 +145,19 @@ is not proved here (open item O1).
 ## 5. Core operations
 
 Each operation has its design meaning and its homomorphism. `gov F L x` is
-`witness L (orbit x)`. `verdict F L x` is `gov F L x`.
+`rule F L (orbit x)`. `verdict F L x` is `gov F L x`. The types below use
+the prelude names (section 4).
 
 | Operation | Type | Meaning (design section 3) |
 |---|---|---|
 | `deposit p q n s` | `Address -> Address -> Nat -> Escrow -> Escrow` | `credit` on the ledger, append `(p, q, n)` to the claims, identity on `L` |
-| `cast F L x` | `Eq Decision (F x) (gov F L x)` | the unit at `x`; the state does not change |
-| `castOrbit F L x y e` | `Eq Tally (orbit x) (orbit y) -> Eq Decision (gov F L x) (gov F L y)` | two ballots in one orbit give one cast, by `cong` |
+| `cast F L x` | `EqDec (F x) (gov F L x)` | the unit at `x`; the state does not change |
+| `castOrbit F L x y e` | `EqTally (orbit x) (orbit y) -> EqDec (gov F L x) (gov F L y)` | two ballots in one orbit give one cast, by `congTD` |
 | `settle F L x c s h` | `Escrow`, with `h : Le n (balance (ledger s) p)` | `decide` on `verdict F L x`: release debits `p` and credits `q`; refund debits `p`; hold gives `s` |
-| `amend Phi F L` | `ChoiceRule` | `Phi (witness L)` |
+| `amend Phi F L` | `ChoiceRule` | `Phi (rule F L)` |
 | `canonical` | `AmendmentRule` | `fun H x => H (orbit x)` |
-| `homAmend F L x` | `Eq Decision (amend canonical F L x) (gov F L x)` | `refl` |
-| `reconstitute F L` | `Aggregation (gov F L)` | `pack (witness L) (fun x => refl)` |
+| `homAmend F L x` | `EqDec (amend canonical F L x) (gov F L x)` | `reflDec` |
+| `reconstitute F L` | `Aggregation (gov F L)` | `mkAgg (gov F L) (rule F L) (fun x => reflDec ..)` |
 
 `settle` has a function type with `L` as an argument. When `Aggregation F`
 has no inhabitant, no program can apply `settle`. This is the empty function
@@ -152,7 +171,7 @@ only proposals are identities and `propose p ; q` is vacuous (design section
 
 | Regime | `Aggregation F` | Compiled contract |
 |---|---|---|
-| Arrow-impossibility | no inhabitant | `deposit` and `cast` only; no `settle`, no `amend` |
+| Arrow-impossibility | no inhabitant | `deposit` only; `cast`, `settle` and `amend` each need `L` |
 | Arrow-Debreu | one orbit rule | all four entries |
 | Schelling-Ising | not reachable at a discrete `D` (section 4.1; USER ruling 2026-10-06) | not applicable |
 
@@ -183,18 +202,27 @@ behind the ruling are in `probe/CAPABILITY.md`.
 - The host is the assay kernel. It checks the dependent types of a program
   and evaluates its closed terms. escrow-lang has no checker of its own.
 - The target is one `.asy` file. Assay has no import form, so the file
-  holds the prelude, the program and the contract, in that order.
-- The prelude (`prelude/Prelude.asy`) defines the ledger-lang names of
-  section 3 over the assay forms: `Prod` over `prod(..)`, `Sum` over
-  `sum(..)`, `Sigma` over `(x : A) * B`, Pi as assay Pi, and `Eq`, `List`,
-  `Option` and `Decision` as `mu` families in `Type 0`. Only the prelude
-  uses `mu` and `def rec`.
+  holds `def members : Nat := N`, the prelude, the program and the
+  contract, in that order (probe-forced: the prelude reads `members`).
+- Assay has no implicit arguments, so each prelude name takes its type
+  arguments explicitly (probe-forced).
+- The prelude (`prelude/Prelude.asy`, eight `-- @section` parts) defines
+  the forms of section 3 and the types and operations of sections 4 and 5
+  (O8 RULED 2026-10-06): `EqNat`, `EqDec`, `EqTally`, `Decision`,
+  `Ballots`, `Claims`, `Config`, `Tally` and `Aggregation` as `mu`
+  families in `Type 0`, and `Option` and `Sum` as type functions over
+  `sum (..)`. Only the prelude uses `mu` and `def rec`.
+  `zsh prelude/assemble.sh PROGRAM` writes the target file in the order
+  above. M0 results: `probe/CAPABILITY.md`, "M0 prelude and examples".
 - The generator is a Bend 2 program, pinned to the assay commit in `PIN`.
   It reads a program, applies the refusal list of section 2, tabulates the
   orbit rule with the assay kernel, writes the `.asy` file and runs
   `assay check`, `assay axioms` and `assay emit`.
-- `assay axioms` must report no axiom. The assay kernel accepts an axiom
-  witness, so this check is the generator's job.
+- USER ruling 2026-10-06: `assay axioms` reports no axiom for the prelude
+  and the program. For the contract file it reports only `EvmOpcodes`, the
+  marker of the assay core protocol that `emit` requires (`M0_PROTOCOL`;
+  `probe/CAPABILITY.md`, P1). The assay kernel accepts an axiom witness, so
+  this check is the generator's job.
 
 ## 9. Open items
 
@@ -217,6 +245,29 @@ behind the ruling are in `probe/CAPABILITY.md`.
 - O7. No design operation sends funds out of the contract. Refund removes
   `n` from the ledger with no recipient, and release credits `q` with no
   withdrawal.
+- O8. RULED 2026-10-06: the USER accepted the proposal below. Probe P2: a
+  constructor of a `mu` family with a parameter cannot
+  appear in a term, and a family with a type index lives in `Type 1` and
+  its `match` cannot use a function on the outer type. Thus `Eq A x y`,
+  `List A` and `Option A` of section 3 cannot be written as planned.
+  Proposal: `EqNat`, `EqDec` and `EqTally` (one family per index type),
+  `Ballots` and `Claims` (one list family per element type), and `Option A`
+  and `Sum A B` over the built-in `sum`. The generic `Monad`, `fold`,
+  `unfold` and `filter` on `List` become one set per list family.
+- O9. `unfold` has no structural measure. Built-in `Nat` has no
+  eliminator, so fuel cannot be a `Nat`, and the prelude invents no fuel.
+  The prelude has no `unfold`. Section 2 says that recursion comes from
+  `fold` and `unfold`; until a ruling, only `fold`. Ruling item.
+- O10. Probe-forced (M0, 2026-10-06): the assay kernel refuses
+  `fun (s : S) => (s.1, s.2)` for `S := (n : Nat) * EqNat n 3`. The type
+  of `s.2` holds `s.1` without a return annotation, a written `s.1` holds
+  it with `as self return Nat`, and conversion does not identify the two.
+  Assay has no Sigma pattern (`match`, `case` and `let` on a pair do not
+  parse). Thus `Config`, `Tally` and `Aggregation F` are `mu` records read
+  by `match`, and the Sigma forms that stay (`IsSelfConstituting`,
+  `EscrowDAO`, `Le`) are built and never projected. Ruling item: keep the
+  records, or fix the conversion in assay (the assay tree is read-only for
+  this work).
 
 ## 10. Milestones
 
