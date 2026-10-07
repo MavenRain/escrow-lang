@@ -180,12 +180,11 @@ only proposals are identities and `propose p ; q` is vacuous (design section
 
 The compiler writes one contract `EscrowDAO` in assay surface syntax.
 
-The writer is `gen/contract.sh`. It writes the interim form (d) of O12.
-O12 is RULED (b): when assay has a surface branch, the three `settle`
-entries below become one entry with the case split. Its input is
-the member count, the regime and, for Arrow-Debreu, one decision code per
-tally from `gen/table.sh` (release 1, refund 2, hold 3). Probe P8: the
-contract has no branch.
+The writer is `gen/contract.sh`. It implements O12 (b) using the local
+Assay dependency in `toolchain/`: the base in `PIN` plus the recorded
+surface-branch patch. Its input is the member count, the regime and, for
+Arrow-Debreu, one decision code per tally from `gen/table.sh` (release 1,
+refund 2, hold 3).
 
 - `storage` holds the ledger as a mapping from address to word and the
   claims as a count and three mappings from index to payer, payee and
@@ -200,11 +199,10 @@ contract has no branch.
   the claim. It returns the claim index.
 - `cast` takes the ballots, computes the tally and returns the verdict. It
   writes nothing.
-- `settle` is three entries, `settleRelease`, `settleRefund` and
-  `settleHold`. Each takes a claim index and the ballots, computes the
-  verdict, and reverts unless the verdict is its decision. Then it does its
-  leg of the case split of design section 3. The proof `h` becomes the
-  guard `n <= balance p`. A failed guard reverts.
+- `settle` takes a claim index and the ballots, computes the verdict, and
+  branches to the release, refund or hold leg of design section 3. The
+  proof `h` becomes the guard `n <= balance p` before the branch, including
+  hold. A failed guard reverts.
 - `amend` takes no argument at the canonical `Phi`. It returns the packed
   verdict table `sum C_i * 4^i` and writes nothing (open item O5).
 - Proof terms erase. Each guard is checked and its witness is dropped.
@@ -309,9 +307,12 @@ behind the ruling are in `probe/CAPABILITY.md`.
   decision. RULED 2026-10-06 (USER): (b). Assay gets a surface branch
   statement that lowers to the core `le a b yes no`, and `settle` becomes
   one entry with the case split of design section 3. The (d) writer is
-  the interim form until the assay branch lands. The tally lookups need no
-  branch and can stay. Limit: Arrow-Debreu needs `members <= 8`. At 9
-  members, assay emission hits its closed-specialization budget; at 10,
+  the interim form until the assay branch lands. The implementation now
+  carries the surface branch as an escrow-local dependency patch, builds
+  only in `.tools/assay`, and emits one `settle` entry. No sibling checkout
+  is modified. The tally lookups need no
+  branch and can stay. The validated Arrow-Debreu range is `members <= 8`.
+  In the interim writer, 9 members hit the closed-specialization budget; at 10,
   the mapping writes also exceed the 128-step constructor limit. This
   bound keeps the packed `amend` table within one word. Zero members is
   valid: its only tally is `(0, 0, 0)` and `cast` has no arguments.
@@ -327,6 +328,8 @@ behind the ruling are in `probe/CAPABILITY.md`.
   O12). The contract writer (`gen/contract.sh`) and the table step
   (`gen/table.sh`) are written. Both regimes pass `check`, `axioms` and
   `emit` at members 3. The Bend 2 generator, the refusal test and the
-  differential tests are not started. O12 RULED (b): the next step is an
-  assay surface branch; then `settle` becomes one entry.
+  kernel differential tests are not started. O12 (b) is now carried as a
+  local compiler patch and `settle` is one entry. `test/settlement.py`
+  checks model and emitted EVM behavior against independent expectations;
+  it does not yet compare either with dependent kernel evaluation.
 - M2: open items O4 and O7, after a ruling.

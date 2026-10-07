@@ -5,12 +5,10 @@
 # surface syntax (SPEC sections 7 and 8, O12).  C_i is the decision code of
 # tally i in the order of gen/table.sh: release 1, refund 2, hold 3.
 #
-# Probe P8: a surface body has no two-way branch, so the contract has no
-# branch.  The constructor writes two lookup mappings.  `weight` maps the
+# The constructor writes two lookup mappings.  `weight` maps the
 # ballot codes 1, 2 and 3 to 1, N + 1 and 0, so the sum of the weights of
 # the ballots is r + (N + 1) f, one key per tally.  `verdict` maps that key
-# to the decision code.  `settle` is three entries, one per decision.  Each
-# entry checks that the verdict is its decision and reverts otherwise.  No
+# to the decision code.  `settle` branches on the certified decision.  No
 # entry writes `weight` or `verdict`.
 set -euo pipefail
 usage() {
@@ -24,10 +22,9 @@ shift 2
 case $regime in
   impossibility) (( $# == 0 )) || usage ;;
   debreu)
-    # N = 9 exceeds Assay's closed-specialization emission budget.
-    # N = 10 also exceeds its 128-step constructor body limit.
-    # The supported bound keeps amend's packed table within one word.
-    [[ $n == [0-8] ]] || { print -u2 -r -- "contract: debreu needs N <= 8 (assay emission limit), got $n"; exit 2 }
+    # The supported emission range is validated through N = 8.
+    # Larger inputs remain refused; amend's table fits within one word.
+    [[ $n == [0-8] ]] || { print -u2 -r -- "contract: debreu needs N <= 8 (validated emission range), got $n"; exit 2 }
     (( $# == (n + 1) * (n + 2) / 2 )) || {
       print -u2 -r -- "contract: $(( (n + 1) * (n + 2) / 2 )) codes needed for N = $n, got $#"
       exit 2
@@ -96,22 +93,18 @@ print -r -- '    pure d'
 
 # settle c x: the claim with index c and the ballots x (design section 3).
 # The guard a <= bp is the proof h of SPEC section 5.
-settle() {
-  print -r -- "  entry $1 (c : Word)$ballots : Eff Sig Word := do"
-  tally
-  print -r -- "    guard le d (word $2) ; guard le (word $2) d ;"
-  print -r -- '    p <- sload payer c ; a <- sload amount c ;'
-  print -r -- '    bp <- sload ledger p ; guard le a bp ;'
-}
-settle settleRelease 1
-print -r -- '    bp1 <- sub bp a ; sstore ledger p bp1 ;'
-print -r -- '    q <- sload payee c ; bq <- sload ledger q ; bq1 <- add bq a ; sstore ledger q bq1 ;'
-print -r -- '    pure d'
-settle settleRefund 2
-print -r -- '    bp1 <- sub bp a ; sstore ledger p bp1 ;'
-print -r -- '    pure d'
-settle settleHold 3
-print -r -- '    pure d'
+print -r -- "  entry settle (c : Word)$ballots : Eff Sig Word := do"
+tally
+print -r -- '    p <- sload payer c ; a <- sload amount c ;'
+print -r -- '    bp <- sload ledger p ; guard le a bp ;'
+print -r -- '    if le d (word 1) then'
+print -r -- '      bp1 <- sub bp a ; sstore ledger p bp1 ;'
+print -r -- '      q <- sload payee c ; bq <- sload ledger q ; bq1 <- add bq a ; sstore ledger q bq1 ;'
+print -r -- '      pure d'
+print -r -- '    else if le d (word 2) then'
+print -r -- '      bp1 <- sub bp a ; sstore ledger p bp1 ;'
+print -r -- '      pure d'
+print -r -- '    else pure d'
 
 # amend at the canonical Phi: the packed table sum C_i * 4^i (SPEC O5).
 print -r -- "  entry amend () : Eff Sig Word := do pure (word $packed)"

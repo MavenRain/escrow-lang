@@ -356,7 +356,7 @@ branch. For a surface contract, `axioms` reports only `EvmOpcodes`.
 
 ## M1 contract writer (2026-10-06)
 
-`gen/contract.sh` writes a surface contract with no branch (SPEC O12 and
+At this probe revision, `gen/contract.sh` wrote a surface contract with no branch (SPEC O12 and
 section 7). `gen/table.sh` gives its table by the P7 method over all
 tallies.
 
@@ -370,3 +370,12 @@ tallies.
 
 Probe-forced: a `run` test of `cast` or `settle` must give the table slots
 with `--storage SLOT=WORD`. `assay mapping-slot` gives the slots.
+
+## Local surface branch (2026-10-07)
+
+The current compiler is the base in `PIN` plus the patch in `toolchain/`.
+The historical P8 refusal above still describes the unpatched host.
+The local dependency accepts tail `if le a b then BODY else BODY`, and
+`gen/contract.sh` now emits one `settle` entry. `toolchain/assay.py` builds
+and runs only the checkout under escrow-lang's `.tools/assay`; no sibling
+Assay checkout is a write target. See `toolchain/README.md` for validation.

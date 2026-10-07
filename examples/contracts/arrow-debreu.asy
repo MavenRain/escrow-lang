@@ -23,39 +23,22 @@ contract EscrowDAO where
     guard le (word 1) b2 ; guard le b2 (word 3) ; w2 <- sload weight b2 ; k3 <- add k2 w2 ;
     d <- sload verdict k3 ;
     pure d
-  entry settleRelease (c : Word) (b0 : Word) (b1 : Word) (b2 : Word) : Eff Sig Word := do
+  entry settle (c : Word) (b0 : Word) (b1 : Word) (b2 : Word) : Eff Sig Word := do
     let k0 : Word := word 0 ;
     guard le (word 1) b0 ; guard le b0 (word 3) ; w0 <- sload weight b0 ; k1 <- add k0 w0 ;
     guard le (word 1) b1 ; guard le b1 (word 3) ; w1 <- sload weight b1 ; k2 <- add k1 w1 ;
     guard le (word 1) b2 ; guard le b2 (word 3) ; w2 <- sload weight b2 ; k3 <- add k2 w2 ;
     d <- sload verdict k3 ;
-    guard le d (word 1) ; guard le (word 1) d ;
     p <- sload payer c ; a <- sload amount c ;
     bp <- sload ledger p ; guard le a bp ;
-    bp1 <- sub bp a ; sstore ledger p bp1 ;
-    q <- sload payee c ; bq <- sload ledger q ; bq1 <- add bq a ; sstore ledger q bq1 ;
-    pure d
-  entry settleRefund (c : Word) (b0 : Word) (b1 : Word) (b2 : Word) : Eff Sig Word := do
-    let k0 : Word := word 0 ;
-    guard le (word 1) b0 ; guard le b0 (word 3) ; w0 <- sload weight b0 ; k1 <- add k0 w0 ;
-    guard le (word 1) b1 ; guard le b1 (word 3) ; w1 <- sload weight b1 ; k2 <- add k1 w1 ;
-    guard le (word 1) b2 ; guard le b2 (word 3) ; w2 <- sload weight b2 ; k3 <- add k2 w2 ;
-    d <- sload verdict k3 ;
-    guard le d (word 2) ; guard le (word 2) d ;
-    p <- sload payer c ; a <- sload amount c ;
-    bp <- sload ledger p ; guard le a bp ;
-    bp1 <- sub bp a ; sstore ledger p bp1 ;
-    pure d
-  entry settleHold (c : Word) (b0 : Word) (b1 : Word) (b2 : Word) : Eff Sig Word := do
-    let k0 : Word := word 0 ;
-    guard le (word 1) b0 ; guard le b0 (word 3) ; w0 <- sload weight b0 ; k1 <- add k0 w0 ;
-    guard le (word 1) b1 ; guard le b1 (word 3) ; w1 <- sload weight b1 ; k2 <- add k1 w1 ;
-    guard le (word 1) b2 ; guard le b2 (word 3) ; w2 <- sload weight b2 ; k3 <- add k2 w2 ;
-    d <- sload verdict k3 ;
-    guard le d (word 3) ; guard le (word 3) d ;
-    p <- sload payer c ; a <- sload amount c ;
-    bp <- sload ledger p ; guard le a bp ;
-    pure d
+    if le d (word 1) then
+      bp1 <- sub bp a ; sstore ledger p bp1 ;
+      q <- sload payee c ; bq <- sload ledger q ; bq1 <- add bq a ; sstore ledger q bq1 ;
+      pure d
+    else if le d (word 2) then
+      bp1 <- sub bp a ; sstore ledger p bp1 ;
+      pure d
+    else pure d
   entry amend () : Eff Sig Word := do pure (word 356271)
   constructor := do
     sstore weight (word 1) (word 1) ; sstore weight (word 2) (word 4) ;

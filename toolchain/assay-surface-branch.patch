@@ -1,0 +1,502 @@
+diff --git a/Makefile b/Makefile
+index 45101a0..f9950a3 100644
+--- a/Makefile
++++ b/Makefile
+@@ -30,0 +31 @@ test:
++	python3 -P dev/surface-branch-test.py
+diff --git a/README.md b/README.md
+index 9f1e8fe..2a86dea 100644
+--- a/README.md
++++ b/README.md
+@@ -210,0 +211,2 @@ reading the executing contract's address with `self <- address`.
++After M2, the [surface branch](dev/SURFACE-BRANCH.md) ends an entry with
++`if le a b then BODY else BODY`, lowered to the core `le` branch.
+@@ -465,0 +468 @@ RETURN-ABI, SOURCE-EVENTS, STORAGE-PROOFS, ERC20-SOURCE,
++`--surface-branch` adds SURFACE-BRANCH to those 110 legs, for 111 legs.
+diff --git a/dev/STAGE-SURFACE-BRANCH-COMMIT.txt b/dev/STAGE-SURFACE-BRANCH-COMMIT.txt
+new file mode 100644
+index 0000000..7f4ffe2
+--- /dev/null
++++ b/dev/STAGE-SURFACE-BRANCH-COMMIT.txt
+@@ -0,0 +1,16 @@
++Surface: add a tail branch statement to contract source
++
++Add `if le a b then BODY else BODY` as the last statement of an entry
++body. Both legs are necessary, and each leg can end in a different
++tail branch. Lower it to the core `le` branch with the same bindings,
++state and proof evidence in each leg. Include leg statements in the
++contract step scans. Reserve `if`, `then` and `else`.
++
++Refuse a statement after the branch, a condition that is not `le`, a
++missing `else` and a branch in a constructor.
++
++Add a source example, a SURFACE-BRANCH gate leg under the new
++`--surface-branch` mode and four built mutations with controls. Keep
++`--m2-reconcile` at 110 legs. Raise the emitter line bound from 1800
++to 1815 and the ratified total from 3550 to 3565 (USER ruling
++2026-10-06).
+diff --git a/dev/SURFACE-BRANCH-MUTATIONS.md b/dev/SURFACE-BRANCH-MUTATIONS.md
+new file mode 100644
+index 0000000..82f55cb
+--- /dev/null
++++ b/dev/SURFACE-BRANCH-MUTATIONS.md
+@@ -0,0 +1,22 @@
++# Surface branch mutations
++
++Each mutation is compiled in a disposable copy. The build must succeed.
++The named witness must exit 1 with its diagnostic. The restored source
++must rebuild and pass the same witness.
++
++| Mutation | Changed behavior | Witness |
++| --- | --- | --- |
++| LEGS | Lower the branch with the THEN and ELSE legs exchanged | Five-file comparison with the `guard` program |
++| OPERANDS | Lower `le a b` as `le b a` | Five-file comparison with the `guard` program |
++| TAIL | Accept a statement after the `if` | Refuse a statement after the `if` |
++| SCAN | Omit leg statements from the contract step scans | Caller read and ABI state mutability in a leg |
++
++LEGS and OPERANDS change `Local.Contract.lower.f12919` and fail
++`SURFACE-BRANCH-PAIR`. TAIL changes `Contract.branch` and fails
++`SURFACE-BRANCH-REFUSAL trailing`. SCAN changes `Contract.all_steps` and
++fails `SURFACE-BRANCH-SCAN`. `mutations/surface-branch.json` holds the
++four replacements and a SHA-256 for each replaced definition. The test
++saves the exit codes, markers and source hashes as `MUTANTS`.
++
++Status: the mutations have not run. See the
++[slice notes](SURFACE-BRANCH.md).
+diff --git a/dev/SURFACE-BRANCH.md b/dev/SURFACE-BRANCH.md
+new file mode 100644
+index 0000000..d36ae61
+--- /dev/null
++++ b/dev/SURFACE-BRANCH.md
+@@ -0,0 +1,72 @@
++# Contract surface branch
++
++This slice starts at `30feb7b02baa1964e0743aedfb0d4b477c9b870a`. It is
++not part of an M1 or M2 milestone group. It adds one statement to
++contract source:
++
++```text
++entry settle (bonus : Word) : Eff Sig Word := do
++  d <- sload verdict ;
++  if le d (word 1) then
++    pure (word 1)
++  else
++    revert
++```
++
++`if le a b then BODY else BODY` must be the last statement of an entry
++body. Both legs are necessary. Each leg is a statement list with its
++own ending, which can be a different tail `if`. The statement lowers to
++the [core](M1-SURFACE.md) `le a b THEN ELSE`, which runs THEN when
++`a <= b` as unsigned Words. Each leg lowers with the bindings, state,
++written fields and proof evidence of the statements before the `if`.
++Literal operands use `(word N)`.
++
++The two contract-wide step scans include the statements in both legs.
++Thus effect selection and ABI state mutability see a read or a write
++that occurs only in a leg. `if`, `then` and `else` are reserved source
++names.
++
++The parser refuses these sources:
++
++| Source | Code |
++| --- | --- |
++| A statement after the `if`, at the top or in a leg | `SURFACE_BRANCH` |
++| A condition that is not `le a b` | `SURFACE_BRANCH` |
++| An `if` in a constructor | `SURFACE_BRANCH` |
++| An `if` without `else` | `SURFACE_SYNTAX` |
++| A leg that uses a name that is not in its scope | `SURFACE_SCOPE` |
++| A field or a binding named `else` or `then` | `SURFACE_NAME` |
++
++The kernel, core recognizer, model and axiom set do not change. No new
++axiom or runtime intrinsic is added. Programs that do not use the three
++reserved names keep their artifacts.
++
++[SurfaceBranch.asy](../examples/SurfaceBranch.asy) has a three-way
++nested `settle` on plain Word fields:
++
++```sh
++_build/bin/assay emit examples/SurfaceBranch.asy -o SurfaceBranch-out
++python3 -P dev/surface-branch-test.py
++python3 -P dev/stage-a-gates.py --surface-branch
++```
++
++The focused gate has five parts. `live` runs 30 cases (three bonus
++values, five verdicts and two callers) and compares the source model
++and geth with independent expectations. `pairs` compares all five
++emitted files of `if .. else revert` with the equivalent `guard`
++program, also in a nested leg. `scan` checks a caller read that occurs
++only in a leg and the ABI state mutability. `refusals` checks eight
++invalid sources. `mutants` builds the four
++[mutations](SURFACE-BRANCH-MUTATIONS.md) with restored controls.
++
++`--surface-branch` runs the 110 `--m2-reconcile` legs and then
++SURFACE-BRANCH, for 111 legs. `--m2-reconcile` and its record do not
++change.
++
++The emitter measures 1812/1815 lines. USER ruling 2026-10-06 raises the
++emitter bound in `dev/trusted-lines.py` from 1800 to 1815 and the
++ratified total from 3550 to 3565.
++
++Status: `live`, `pairs`, `scan` and `refusals` pass. The mutants and
++the full gate have not run. They wait until the M2 closure battery
++ends, to keep load off that run.
+diff --git a/dev/mutations/surface-branch.json b/dev/mutations/surface-branch.json
+new file mode 100644
+index 0000000..31bcb4a
+--- /dev/null
++++ b/dev/mutations/surface-branch.json
+@@ -0,0 +1,57 @@
++{
++  "source": "src/emitter.bend",
++  "cases": [
++    [
++      "LEGS",
++      [
++        {
++          "definition": "Local.Contract.lower.f12919",
++          "sha256": "623ad8cd5e0853896dc097d690cbd9516e0ded0d2fcdf698b60fd99db5da0432",
++          "replacement": "@unsafe\ndef Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, param_2054):\n  (+scrut12938 = param_2054\n  Match.List(&2, Contract.Step, &2, CheckResult(String), scrut12938, _ => (((+scrut12939 = ending_1920\nMatch.Contract_Ending(&2, CheckResult(String), scrut12939, +p12940 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p12940), +item12950 => ((+local12943 => ((+scrut12949 = {SeqList.filter(&2, Contract.Invariant, (+local12945 => (SeqList.exists(&2, String, (+local12947 => (SeqList.exists(&2, String, +item12948 => NativeString.equal(local12947, item12948), written_1946))), Contract.invariant_fields(local12945)))), invariants_1915) : ListOf(Contract.Invariant)}\nobligations_1922(scrut12949, state_1945, evidence_1947, \"Tx\", Contract.app(\"done\", Con{local12943, Nil{}})))))(item12950)), +item12951 => Fail{item12951})), +p12952 => (Contract.fail(&2, String, p12952, \"RETURN\", \"an entry must return Word\")), +p12953 => (Done{\"abort\"}), +p12954 => +p12955 => (reject_1923(env_1944, Tup2{p12954, p12955})), +branch_at_90020 => +branch_left_90021 => +branch_right_90022 => +branch_then_90023 => +branch_else_90024 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, branch_left_90021), +left_90025 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, branch_right_90022), +right_90026 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Local.Contract.lower.f12919(Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_then_90023), invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_then_90023)), +then_90027 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Local.Contract.lower.f12919(Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_else_90024), invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_else_90024)), +else_90028 => (Done{Contract.app(\"le\", Con{left_90025, Con{right_90026, Con{else_90028, Con{then_90027, Nil{}}}}})}), +e_90029 => Fail{e_90029})), +e_90030 => Fail{e_90030})), +e_90031 => Fail{e_90031})), +e_90032 => Fail{e_90032})))))), +p12957 => +p12958 => ((+scrut12971 = {(+local12964 => +local12966 => +local12968 => +local12970 => (Contract.proof(None{}, Some{evidence_1947}, predicates_1916, helpers_1917, local12964, local12966, local12968, local12970))) : Reusable(Big, Reusable(ListOf(TupleOf2(String, Contract.Binding)), Reusable(OptionOf(Contract.Resolved_claim), Reusable(Contract.Proof, CheckResult(TupleOf2(Contract.Resolved_claim, String))))))}\n  (+scrut12972 = {String.append(\"_assay_v\", Big.show(index_1943)) : String}\n  ((+scrut12993 = {(+local12974 => ((+local12982 => +local12984 => +local12986 => +local12988 => +local12990 => +local12992 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local12982, local12984, local12986, local12988, local12990, local12992)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(local12974), Contract.Binding.Word_value{scrut12972}}, env_1944}, state_1945, written_1946, evidence_1947, p12958))) : Reusable(Contract.Token, CheckResult(String))}\n((+scrut13017 = {(+local12995 => +local12997 => +local12999 => +local13001 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, local12999), +item13015 => ((+local13004 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, local13001), +item13013 => ((+local13007 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(local12997), +item13011 => ((+local13010 => (Done{Contract.app(local12995, Con{local13004, Con{local13007, Con{Contract.lambda(\"_assay_result\", \"ResultWord\", String.append(\"case _assay_result with | 0 (\", String.append(scrut12972, String.append(\" : Word 256) => \", String.append(local13010, \" | 1 (_assay_error : prod ()) => abort\"))))), Nil{}}}})}))(item13011)), +item13012 => Fail{item13012})))(item13013)), +item13014 => Fail{item13014})))(item13015)), +item13016 => Fail{item13016}))) : Reusable(String, Reusable(Contract.Token, Reusable(Contract.Word, Reusable(Contract.Word, CheckResult(String)))))}\n((+scrut13018 = p12957\nMatch.Contract_Step(&2, CheckResult(String), scrut13018, +p13019 => +p13020 => ((Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.slot(&2, String, fields_1913, p13020), +item13047 => ((+local13023 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13032 => +local13034 => +local13036 => +local13038 => +local13040 => +local13042 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13032, local13034, local13036, local13038, local13040, local13042)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(p13019), Contract.Binding.Word_value{scrut12972}}, env_1944}, Con{Tup2{Get.Contract.Token.text(p13020), Contract.Binding.Word_value{scrut12972}}, SeqList.remove_assoc(&2, &2, String, Contract.Binding, +x => +y => NativeString.equal(x, y), Get.Contract.Token.text(p13020), state_1945)}, written_1946, evidence_1947, p12958), +item13045 => ((+local13044 => (Done{Contract.app(\"load\", Con{local13023, Con{Contract.lambda(scrut12972, \"Word 256\", local13044), Nil{}}})}))(item13045)), +item13046 => Fail{item13046})))(item13047)), +item13048 => Fail{item13048}))), +p13050 => +p13051 => ((Match.Result(&2, ListOf(String), &2, Error, &2, CheckResult(String), (+scrut13053 = p13050\nMatch.Recognize_Context(&2, Contract.Word, &2, CheckResult(ListOf(String)), scrut13053, _ => (Done{Nil{}}), _ => (Done{Nil{}}), _ => (Done{Nil{}}), +p13054 => (Match.Result(&2, String, &2, Error, &2, CheckResult(ListOf(String)), Contract.word(env_1944, p13054), +item13058 => ((+local13057 => (Done{Con{local13057, Nil{}}}))(item13058)), +item13059 => Fail{item13059})), _ => (Done{Nil{}}))), +item13067 => ((+local13061 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(p13051), +item13065 => ((+local13064 => (Done{Contract.app(Recognize.context_name(&2, Contract.Word, p13050), List.append(&2, String, local13061, Con{Contract.lambda(scrut12972, \"Word 256\", local13064), Nil{}}))}))(item13065)), +item13066 => Fail{item13066})))(item13067)), +item13068 => Fail{item13068}))), +p13070 => (Contract.fail(&2, String, p13070, \"EFFECT\", \"deployer is available only in constructors\")), +p13071 => +p13072 => +p13073 => (scrut13017(\"add\", p13071, p13072, p13073)), +p13074 => +p13075 => +p13076 => (scrut13017(\"sub\", p13074, p13075, p13076)), +p13077 => +p13078 => ((Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.slot(&2, String, fields_1913, p13077), +item13110 => ((+local13081 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13078), +item13108 => ((+local13084 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13093 => +local13095 => +local13097 => +local13099 => +local13101 => +local13103 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13093, local13095, local13097, local13099, local13101, local13103)))(index_1943, env_1944, Con{Tup2{Get.Contract.Token.text(p13077), Contract.Binding.Word_value{local13084}}, SeqList.remove_assoc(&2, &2, String, Contract.Binding, +x => +y => NativeString.equal(x, y), Get.Contract.Token.text(p13077), state_1945)}, Con{Get.Contract.Token.text(p13077), written_1946}, evidence_1947, p12958), +item13106 => ((+local13105 => (Done{Contract.app(\"store\", Con{local13081, Con{local13084, Con{local13105, Nil{}}}})}))(item13106)), +item13107 => Fail{item13107})))(item13108)), +item13109 => Fail{item13109})))(item13110)), +item13111 => Fail{item13111}))), +p13113 => +p13114 => ((Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13113), +item13146 => ((+local13117 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13114), +item13144 => ((+local13120 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13129 => +local13131 => +local13133 => +local13135 => +local13137 => +local13139 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13129, local13131, local13133, local13135, local13137, local13139)))(index_1943, env_1944, state_1945, written_1946, evidence_1947, p12958), +item13142 => ((+local13141 => (Done{Contract.app(\"le\", Con{local13117, Con{local13120, Con{local13141, Con{\"abort\", Nil{}}}}})}))(item13142)), +item13143 => Fail{item13143})))(item13144)), +item13145 => Fail{item13145})))(item13146)), +item13147 => Fail{item13147}))), +p13149 => +p13150 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13150), +item13159 => ((+local13153 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(p13149), +item13157 => ((+local13156 => (Done{String.append(\"(let \", String.append(scrut12972, String.append(\" : Word 256 := \", String.append(local13153, String.append(\" in \", String.append(local13156, \")\"))))))}))(item13157)), +item13158 => Fail{item13158})))(item13159)), +item13160 => Fail{item13160})), +p13161 => +p13162 => +p13163 => +p13164 => ((Match.Result(&2, Contract.Runtime_condition, &2, Error, &2, CheckResult(String), Contract.resolved_condition(predicates_1916, env_1944, p13161, p13164), +item13269 => ((+local13167 => (Match.Result(&2, Contract.Resolved_claim, &2, Error, &2, CheckResult(String), resolved_claim_1921(env_1944, p13162), +item13267 => ((+local13170 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Match.Maybe(&2, TupleOf2(Contract.Token, ListOf(Contract.Word)), &2, CheckResult(String), p13163, _ => (Done{\"abort\"}), +value => ((+local13174 => (reject_1923(env_1944, local13174)))(value))), +item13265 => ((+local13176 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13185 => +local13187 => +local13189 => +local13191 => +local13193 => +local13195 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13185, local13187, local13189, local13191, local13193, local13195)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(p13161), Contract.Binding.Proof_value{scrut12972, local13170}}, env_1944}, state_1945, written_1946, Contract.evidence_for(scrut12972, local13170, evidence_1947), p12958), +item13263 => ((+local13197 => ((+local13206 => +local13208 => +local13210 => +local13212 => (Local.Contract.guards.f13198(local13176, p13161, local13206, local13208, local13210, local13212)))(local13170, local13167, String.append(scrut12972, \"_guard\"), (+local13200 => (Done{Contract.erased_apply(scrut12972, Contract.claim_type(local13170), \"Tx\", local13200, local13197)})))))(item13263)), +item13264 => Fail{item13264})))(item13265)), +item13266 => Fail{item13266})))(item13267)), +item13268 => Fail{item13268})))(item13269)), +item13270 => Fail{item13270}))), +p13272 => +p13273 => +p13274 => +p13275 => +p13276 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13274), +item13313 => ((+local13279 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13275), +item13311 => ((+local13282 => ((+scrut13283 = {Native.choose(&2, String, NativeString.equal(Get.Contract.Token.text(p13272), \"addLt\"), _ => (Contract.app(\"AddFits\", Con{local13279, Con{local13282, Nil{}}})), _ => (Contract.app(\"Le\", Con{local13282, Con{local13279, Nil{}}}))) : String}\n(Match.Result(&2, String, &2, Error, &2, CheckResult(String), Match.Maybe(&2, Contract.Proof, &1, Reusable(Unit, CheckResult(String)), p13276, _ => ((+local13286 => ((+scrut13287 = local13286\nDone{String.append(\"(\", String.append(Contract.invariant_proof(evidence_1947, Contract.Resolved_claim.Atomic{scrut13283}), String.append(\" : \", String.append(scrut13283, \")\"))))})))), +value => ((+local13289 => +local13291 => ((+scrut13292 = local13291\nMatch.Result(&2, TupleOf2(Contract.Resolved_claim, String), &2, Error, &2, CheckResult(String), scrut12971(Big.zero(), env_1944, Some{Contract.Resolved_claim.Atomic{scrut13283}}, local13289), +item13299 => ((+local13295 => ((+scrut13296 = local13295\nMatch.Tuple2(&2, Contract.Resolved_claim, &2, String, &2, CheckResult(String), scrut13296, +p13297 => +p13298 => (Done{p13298})))))(item13299)), +item13300 => Fail{item13300}))))(value)))(Unit{}), +item13308 => ((+local13302 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(p13273), +item13306 => ((+local13305 => (Done{Contract.app(Get.Contract.Token.text(p13272), Con{local13279, Con{local13282, Con{local13302, Con{Contract.lambda(scrut12972, \"Word 256\", local13305), Nil{}}}}})}))(item13306)), +item13307 => Fail{item13307})))(item13308)), +item13309 => Fail{item13309})))))(item13311)), +item13312 => Fail{item13312})))(item13313)), +item13314 => Fail{item13314})), +p13315 => +p13316 => +p13317 => ((Match.Result(&2, OptionOf(Contract.Resolved_claim), &2, Error, &2, CheckResult(String), Contract.optional_claim(predicates_1916, env_1944, p13316), +item13352 => ((+local13320 => (Match.Result(&2, TupleOf2(Contract.Resolved_claim, String), &2, Error, &2, CheckResult(String), scrut12971(Big.zero(), env_1944, local13320, p13317), +item13350 => ((+local13323 => ((+scrut13324 = local13323\nMatch.Tuple2(&2, Contract.Resolved_claim, &2, String, &2, CheckResult(String), scrut13324, +p13325 => +p13326 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13335 => +local13337 => +local13339 => +local13341 => +local13343 => +local13345 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13335, local13337, local13339, local13341, local13343, local13345)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(p13315), Contract.Binding.Proof_value{scrut12972, p13325}}, env_1944}, state_1945, written_1946, Contract.evidence_for(scrut12972, p13325, evidence_1947), p12958), +item13348 => ((+local13347 => (Done{Contract.erased_apply(scrut12972, Contract.claim_type(p13325), \"Tx\", p13326, local13347)}))(item13348)), +item13349 => Fail{item13349}))))))(item13350)), +item13351 => Fail{item13351})))(item13352)), +item13353 => Fail{item13353})))))))))))))))\n"
++        }
++      ],
++      null,
++      "pairs",
++      "SURFACE-BRANCH-PAIR"
++    ],
++    [
++      "OPERANDS",
++      [
++        {
++          "definition": "Local.Contract.lower.f12919",
++          "sha256": "623ad8cd5e0853896dc097d690cbd9516e0ded0d2fcdf698b60fd99db5da0432",
++          "replacement": "@unsafe\ndef Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, param_2054):\n  (+scrut12938 = param_2054\n  Match.List(&2, Contract.Step, &2, CheckResult(String), scrut12938, _ => (((+scrut12939 = ending_1920\nMatch.Contract_Ending(&2, CheckResult(String), scrut12939, +p12940 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p12940), +item12950 => ((+local12943 => ((+scrut12949 = {SeqList.filter(&2, Contract.Invariant, (+local12945 => (SeqList.exists(&2, String, (+local12947 => (SeqList.exists(&2, String, +item12948 => NativeString.equal(local12947, item12948), written_1946))), Contract.invariant_fields(local12945)))), invariants_1915) : ListOf(Contract.Invariant)}\nobligations_1922(scrut12949, state_1945, evidence_1947, \"Tx\", Contract.app(\"done\", Con{local12943, Nil{}})))))(item12950)), +item12951 => Fail{item12951})), +p12952 => (Contract.fail(&2, String, p12952, \"RETURN\", \"an entry must return Word\")), +p12953 => (Done{\"abort\"}), +p12954 => +p12955 => (reject_1923(env_1944, Tup2{p12954, p12955})), +branch_at_90020 => +branch_left_90021 => +branch_right_90022 => +branch_then_90023 => +branch_else_90024 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, branch_left_90021), +left_90025 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, branch_right_90022), +right_90026 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Local.Contract.lower.f12919(Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_then_90023), invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_then_90023)), +then_90027 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Local.Contract.lower.f12919(Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_else_90024), invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_else_90024)), +else_90028 => (Done{Contract.app(\"le\", Con{right_90026, Con{left_90025, Con{then_90027, Con{else_90028, Nil{}}}}})}), +e_90029 => Fail{e_90029})), +e_90030 => Fail{e_90030})), +e_90031 => Fail{e_90031})), +e_90032 => Fail{e_90032})))))), +p12957 => +p12958 => ((+scrut12971 = {(+local12964 => +local12966 => +local12968 => +local12970 => (Contract.proof(None{}, Some{evidence_1947}, predicates_1916, helpers_1917, local12964, local12966, local12968, local12970))) : Reusable(Big, Reusable(ListOf(TupleOf2(String, Contract.Binding)), Reusable(OptionOf(Contract.Resolved_claim), Reusable(Contract.Proof, CheckResult(TupleOf2(Contract.Resolved_claim, String))))))}\n  (+scrut12972 = {String.append(\"_assay_v\", Big.show(index_1943)) : String}\n  ((+scrut12993 = {(+local12974 => ((+local12982 => +local12984 => +local12986 => +local12988 => +local12990 => +local12992 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local12982, local12984, local12986, local12988, local12990, local12992)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(local12974), Contract.Binding.Word_value{scrut12972}}, env_1944}, state_1945, written_1946, evidence_1947, p12958))) : Reusable(Contract.Token, CheckResult(String))}\n((+scrut13017 = {(+local12995 => +local12997 => +local12999 => +local13001 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, local12999), +item13015 => ((+local13004 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, local13001), +item13013 => ((+local13007 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(local12997), +item13011 => ((+local13010 => (Done{Contract.app(local12995, Con{local13004, Con{local13007, Con{Contract.lambda(\"_assay_result\", \"ResultWord\", String.append(\"case _assay_result with | 0 (\", String.append(scrut12972, String.append(\" : Word 256) => \", String.append(local13010, \" | 1 (_assay_error : prod ()) => abort\"))))), Nil{}}}})}))(item13011)), +item13012 => Fail{item13012})))(item13013)), +item13014 => Fail{item13014})))(item13015)), +item13016 => Fail{item13016}))) : Reusable(String, Reusable(Contract.Token, Reusable(Contract.Word, Reusable(Contract.Word, CheckResult(String)))))}\n((+scrut13018 = p12957\nMatch.Contract_Step(&2, CheckResult(String), scrut13018, +p13019 => +p13020 => ((Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.slot(&2, String, fields_1913, p13020), +item13047 => ((+local13023 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13032 => +local13034 => +local13036 => +local13038 => +local13040 => +local13042 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13032, local13034, local13036, local13038, local13040, local13042)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(p13019), Contract.Binding.Word_value{scrut12972}}, env_1944}, Con{Tup2{Get.Contract.Token.text(p13020), Contract.Binding.Word_value{scrut12972}}, SeqList.remove_assoc(&2, &2, String, Contract.Binding, +x => +y => NativeString.equal(x, y), Get.Contract.Token.text(p13020), state_1945)}, written_1946, evidence_1947, p12958), +item13045 => ((+local13044 => (Done{Contract.app(\"load\", Con{local13023, Con{Contract.lambda(scrut12972, \"Word 256\", local13044), Nil{}}})}))(item13045)), +item13046 => Fail{item13046})))(item13047)), +item13048 => Fail{item13048}))), +p13050 => +p13051 => ((Match.Result(&2, ListOf(String), &2, Error, &2, CheckResult(String), (+scrut13053 = p13050\nMatch.Recognize_Context(&2, Contract.Word, &2, CheckResult(ListOf(String)), scrut13053, _ => (Done{Nil{}}), _ => (Done{Nil{}}), _ => (Done{Nil{}}), +p13054 => (Match.Result(&2, String, &2, Error, &2, CheckResult(ListOf(String)), Contract.word(env_1944, p13054), +item13058 => ((+local13057 => (Done{Con{local13057, Nil{}}}))(item13058)), +item13059 => Fail{item13059})), _ => (Done{Nil{}}))), +item13067 => ((+local13061 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(p13051), +item13065 => ((+local13064 => (Done{Contract.app(Recognize.context_name(&2, Contract.Word, p13050), List.append(&2, String, local13061, Con{Contract.lambda(scrut12972, \"Word 256\", local13064), Nil{}}))}))(item13065)), +item13066 => Fail{item13066})))(item13067)), +item13068 => Fail{item13068}))), +p13070 => (Contract.fail(&2, String, p13070, \"EFFECT\", \"deployer is available only in constructors\")), +p13071 => +p13072 => +p13073 => (scrut13017(\"add\", p13071, p13072, p13073)), +p13074 => +p13075 => +p13076 => (scrut13017(\"sub\", p13074, p13075, p13076)), +p13077 => +p13078 => ((Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.slot(&2, String, fields_1913, p13077), +item13110 => ((+local13081 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13078), +item13108 => ((+local13084 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13093 => +local13095 => +local13097 => +local13099 => +local13101 => +local13103 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13093, local13095, local13097, local13099, local13101, local13103)))(index_1943, env_1944, Con{Tup2{Get.Contract.Token.text(p13077), Contract.Binding.Word_value{local13084}}, SeqList.remove_assoc(&2, &2, String, Contract.Binding, +x => +y => NativeString.equal(x, y), Get.Contract.Token.text(p13077), state_1945)}, Con{Get.Contract.Token.text(p13077), written_1946}, evidence_1947, p12958), +item13106 => ((+local13105 => (Done{Contract.app(\"store\", Con{local13081, Con{local13084, Con{local13105, Nil{}}}})}))(item13106)), +item13107 => Fail{item13107})))(item13108)), +item13109 => Fail{item13109})))(item13110)), +item13111 => Fail{item13111}))), +p13113 => +p13114 => ((Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13113), +item13146 => ((+local13117 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13114), +item13144 => ((+local13120 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13129 => +local13131 => +local13133 => +local13135 => +local13137 => +local13139 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13129, local13131, local13133, local13135, local13137, local13139)))(index_1943, env_1944, state_1945, written_1946, evidence_1947, p12958), +item13142 => ((+local13141 => (Done{Contract.app(\"le\", Con{local13117, Con{local13120, Con{local13141, Con{\"abort\", Nil{}}}}})}))(item13142)), +item13143 => Fail{item13143})))(item13144)), +item13145 => Fail{item13145})))(item13146)), +item13147 => Fail{item13147}))), +p13149 => +p13150 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13150), +item13159 => ((+local13153 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(p13149), +item13157 => ((+local13156 => (Done{String.append(\"(let \", String.append(scrut12972, String.append(\" : Word 256 := \", String.append(local13153, String.append(\" in \", String.append(local13156, \")\"))))))}))(item13157)), +item13158 => Fail{item13158})))(item13159)), +item13160 => Fail{item13160})), +p13161 => +p13162 => +p13163 => +p13164 => ((Match.Result(&2, Contract.Runtime_condition, &2, Error, &2, CheckResult(String), Contract.resolved_condition(predicates_1916, env_1944, p13161, p13164), +item13269 => ((+local13167 => (Match.Result(&2, Contract.Resolved_claim, &2, Error, &2, CheckResult(String), resolved_claim_1921(env_1944, p13162), +item13267 => ((+local13170 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Match.Maybe(&2, TupleOf2(Contract.Token, ListOf(Contract.Word)), &2, CheckResult(String), p13163, _ => (Done{\"abort\"}), +value => ((+local13174 => (reject_1923(env_1944, local13174)))(value))), +item13265 => ((+local13176 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13185 => +local13187 => +local13189 => +local13191 => +local13193 => +local13195 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13185, local13187, local13189, local13191, local13193, local13195)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(p13161), Contract.Binding.Proof_value{scrut12972, local13170}}, env_1944}, state_1945, written_1946, Contract.evidence_for(scrut12972, local13170, evidence_1947), p12958), +item13263 => ((+local13197 => ((+local13206 => +local13208 => +local13210 => +local13212 => (Local.Contract.guards.f13198(local13176, p13161, local13206, local13208, local13210, local13212)))(local13170, local13167, String.append(scrut12972, \"_guard\"), (+local13200 => (Done{Contract.erased_apply(scrut12972, Contract.claim_type(local13170), \"Tx\", local13200, local13197)})))))(item13263)), +item13264 => Fail{item13264})))(item13265)), +item13266 => Fail{item13266})))(item13267)), +item13268 => Fail{item13268})))(item13269)), +item13270 => Fail{item13270}))), +p13272 => +p13273 => +p13274 => +p13275 => +p13276 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13274), +item13313 => ((+local13279 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, p13275), +item13311 => ((+local13282 => ((+scrut13283 = {Native.choose(&2, String, NativeString.equal(Get.Contract.Token.text(p13272), \"addLt\"), _ => (Contract.app(\"AddFits\", Con{local13279, Con{local13282, Nil{}}})), _ => (Contract.app(\"Le\", Con{local13282, Con{local13279, Nil{}}}))) : String}\n(Match.Result(&2, String, &2, Error, &2, CheckResult(String), Match.Maybe(&2, Contract.Proof, &1, Reusable(Unit, CheckResult(String)), p13276, _ => ((+local13286 => ((+scrut13287 = local13286\nDone{String.append(\"(\", String.append(Contract.invariant_proof(evidence_1947, Contract.Resolved_claim.Atomic{scrut13283}), String.append(\" : \", String.append(scrut13283, \")\"))))})))), +value => ((+local13289 => +local13291 => ((+scrut13292 = local13291\nMatch.Result(&2, TupleOf2(Contract.Resolved_claim, String), &2, Error, &2, CheckResult(String), scrut12971(Big.zero(), env_1944, Some{Contract.Resolved_claim.Atomic{scrut13283}}, local13289), +item13299 => ((+local13295 => ((+scrut13296 = local13295\nMatch.Tuple2(&2, Contract.Resolved_claim, &2, String, &2, CheckResult(String), scrut13296, +p13297 => +p13298 => (Done{p13298})))))(item13299)), +item13300 => Fail{item13300}))))(value)))(Unit{}), +item13308 => ((+local13302 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), scrut12993(p13273), +item13306 => ((+local13305 => (Done{Contract.app(Get.Contract.Token.text(p13272), Con{local13279, Con{local13282, Con{local13302, Con{Contract.lambda(scrut12972, \"Word 256\", local13305), Nil{}}}}})}))(item13306)), +item13307 => Fail{item13307})))(item13308)), +item13309 => Fail{item13309})))))(item13311)), +item13312 => Fail{item13312})))(item13313)), +item13314 => Fail{item13314})), +p13315 => +p13316 => +p13317 => ((Match.Result(&2, OptionOf(Contract.Resolved_claim), &2, Error, &2, CheckResult(String), Contract.optional_claim(predicates_1916, env_1944, p13316), +item13352 => ((+local13320 => (Match.Result(&2, TupleOf2(Contract.Resolved_claim, String), &2, Error, &2, CheckResult(String), scrut12971(Big.zero(), env_1944, local13320, p13317), +item13350 => ((+local13323 => ((+scrut13324 = local13323\nMatch.Tuple2(&2, Contract.Resolved_claim, &2, String, &2, CheckResult(String), scrut13324, +p13325 => +p13326 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), (+local13335 => +local13337 => +local13339 => +local13341 => +local13343 => +local13345 => (Local.Contract.lower.f12919(ending_1920, invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, local13335, local13337, local13339, local13341, local13343, local13345)))(NativeInt.add(index_1943, Big.one()), Con{Tup2{Get.Contract.Token.text(p13315), Contract.Binding.Proof_value{scrut12972, p13325}}, env_1944}, state_1945, written_1946, Contract.evidence_for(scrut12972, p13325, evidence_1947), p12958), +item13348 => ((+local13347 => (Done{Contract.erased_apply(scrut12972, Contract.claim_type(p13325), \"Tx\", p13326, local13347)}))(item13348)), +item13349 => Fail{item13349}))))))(item13350)), +item13351 => Fail{item13351})))(item13352)), +item13353 => Fail{item13353})))))))))))))))\n"
++        }
++      ],
++      null,
++      "pairs",
++      "SURFACE-BRANCH-PAIR"
++    ],
++    [
++      "TAIL",
++      [
++        {
++          "definition": "Contract.branch",
++          "sha256": "8dbfbaee075175c693117ec288a65826c3991bad8075a0d2c70940cf93a1e3c9",
++          "replacement": "@unsafe\ndef Contract.branch(+count_90010: Big, +acc_90011: ListOf(Contract.Step), +tokens_90012: ListOf(Contract.Token)) -> CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))):\n  Match.List(&2, Contract.Token, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), tokens_90012, _ => (Contract.fail(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), Contract.here(tokens_90012), \"BRANCH\", \"expected if\")), +if_90013 => +after_90014 => (Native.choose(&2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.leads(\"le\", after_90014), _ => (Match.Result(&2, ListOf(Contract.Token), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.expect(\"le\", after_90014), +le_90015 => (Match.Result(&2, TupleOf2(Contract.Word, ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.value(Big.zero(), le_90015), +left_90016 => (Match.Tuple2(&2, Contract.Word, &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), left_90016, +lw_90017 => +ll_90018 => (Match.Result(&2, TupleOf2(Contract.Word, ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.value(Big.zero(), ll_90018), +right_90019 => (Match.Tuple2(&2, Contract.Word, &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), right_90019, +rw_90050 => +rl_90051 => (Match.Result(&2, ListOf(Contract.Token), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.expect(\"then\", rl_90051), +then_90052 => (Match.Result(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Local.Contract.steps.f11204(count_90010, Nil{}, then_90052), +tleg_90053 => (Match.Tuple2(&2, TupleOf2(ListOf(Contract.Step), Contract.Ending), &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), tleg_90053, +tbody_90054 => +tl_90055 => (Match.Result(&2, ListOf(Contract.Token), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.expect(\"else\", tl_90055), +else_90056 => (Match.Result(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Local.Contract.steps.f11204(count_90010, Nil{}, else_90056), +eleg_90057 => (Match.Tuple2(&2, TupleOf2(ListOf(Contract.Step), Contract.Ending), &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), eleg_90057, +ebody_90058 => +rest_90059 => (Native.choose(&2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), False{}, _ => (Contract.fail(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), Contract.here(rest_90059), \"BRANCH\", \"if must end the body\")), _ => (Done{Tup2{Tup2{List.reverse(&2, Contract.Step, acc_90011), Contract.Ending.Branch{if_90013, lw_90017, rw_90050, tbody_90054, ebody_90058}}, rest_90059}}))))), +e_90060 => Fail{e_90060})), +e_90061 => Fail{e_90061})))), +e_90062 => Fail{e_90062})), +e_90063 => Fail{e_90063})))), +e_90064 => Fail{e_90064})))), +e_90065 => Fail{e_90065})), +e_90066 => Fail{e_90066})), _ => (Contract.fail(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), if_90013, \"BRANCH\", \"if takes le a b then BODY else BODY\")))))\n"
++        }
++      ],
++      null,
++      "trailing",
++      "SURFACE-BRANCH-REFUSAL trailing"
++    ],
++    [
++      "SCAN",
++      [
++        {
++          "definition": "Contract.all_steps",
++          "sha256": "f0268eb32df1c12208039b42646e994e558e8ead0d2c06f5394c1fe059a95edb",
++          "replacement": "@unsafe\ndef Contract.all_steps(+body_90070: TupleOf2(ListOf(Contract.Step), Contract.Ending)) -> ListOf(Contract.Step):\n  List.append(&2, Contract.Step, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, body_90070), Match.Contract_Ending(&2, ListOf(Contract.Step), Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, body_90070), +w_90071 => (Nil{}), +t_90072 => (Nil{}), +t_90073 => (Nil{}), +t_90074 => +v_90075 => (Nil{}), +t_90076 => +l_90077 => +r_90078 => +then_90079 => +else_90080 => (Nil{})))\n"
++        }
++      ],
++      null,
++      "scan",
++      "SURFACE-BRANCH-SCAN"
++    ]
++  ]
++}
+diff --git a/dev/stage-a-gates.py b/dev/stage-a-gates.py
+index ea01800..c412c32 100644
+--- a/dev/stage-a-gates.py
++++ b/dev/stage-a-gates.py
+@@ -76 +76,2 @@ def main():
+-    m2_reconcile = sys.argv[1:] == ["--m2-reconcile"]
++    surface_branch = sys.argv[1:] == ["--surface-branch"]
++    m2_reconcile = surface_branch or sys.argv[1:] == ["--m2-reconcile"]
+@@ -101 +102 @@ def main():
+-        print("usage: stage-a-gates.py [--keccak|--asm|--reference|--emit|--m0|--m1-executor|--m1-counter|--m1-emission|--m1-run|--m1-surface|--m1-proofs|--m1-nullary|--m1-errors|--m1-guards|--m1-proof-terms|--m1-invariants|--m1-proof-helpers|--m1-proof-bundles|--m1-predicates|--m1-compound-invariants|--m1-compound-guards|--m1-named-guards|--m1-inferred-guards|--m1-inferred-arithmetic|--m1-inferred-helpers|--m1-proof-holes|--m1-inferred-bindings|--m1-inferred-guard-bindings|--m1-context|--m1-context-surface|--m1-equality|--m1-hex-literals|--m1-inferred-words|--m1-fallback|--m1-diff-value|--m1-trace-value|--m1-trace-caller|--m1-diff-caller|--m1-payable|--m1-callvalue|--m1-calldatasize|--m1-calldataload|--m1-address|--m1-close|--m2-reference|--m2-abi-schema|--m2-abi-codec|--m2-packing|--m2-mapping|--m2-events|--m2-calldata|--m2-returndata|--m2-revertdata|--m2-event-decode|--keyword-dispatch|--lexer-direct|--m2-source-packing|--m2-mapping-source|--m2-returndata-cli|--m2-mapping-runtime|--m2-function-abi|--m2-return-abi|--m2-source-events|--m2-storage-proofs|--m2-source-erc20|--m2-abi|--m2-reconcile|--m4-speed]")
++        print("usage: stage-a-gates.py [--keccak|--asm|--reference|--emit|--m0|--m1-executor|--m1-counter|--m1-emission|--m1-run|--m1-surface|--m1-proofs|--m1-nullary|--m1-errors|--m1-guards|--m1-proof-terms|--m1-invariants|--m1-proof-helpers|--m1-proof-bundles|--m1-predicates|--m1-compound-invariants|--m1-compound-guards|--m1-named-guards|--m1-inferred-guards|--m1-inferred-arithmetic|--m1-inferred-helpers|--m1-proof-holes|--m1-inferred-bindings|--m1-inferred-guard-bindings|--m1-context|--m1-context-surface|--m1-equality|--m1-hex-literals|--m1-inferred-words|--m1-fallback|--m1-diff-value|--m1-trace-value|--m1-trace-caller|--m1-diff-caller|--m1-payable|--m1-callvalue|--m1-calldatasize|--m1-calldataload|--m1-address|--m1-close|--m2-reference|--m2-abi-schema|--m2-abi-codec|--m2-packing|--m2-mapping|--m2-events|--m2-calldata|--m2-returndata|--m2-revertdata|--m2-event-decode|--keyword-dispatch|--lexer-direct|--m2-source-packing|--m2-mapping-source|--m2-returndata-cli|--m2-mapping-runtime|--m2-function-abi|--m2-return-abi|--m2-source-events|--m2-storage-proofs|--m2-source-erc20|--m2-abi|--m2-reconcile|--surface-branch|--m4-speed]")
+@@ -116,0 +118 @@ def main():
++        print("       stage-a-gates.py --surface-branch")
+@@ -565,0 +568,5 @@ def main():
++    if surface_branch:
++        stage = "SURFACE-BRANCH"
++        m1_names.add("SURFACE-BRANCH")
++        legs.append(("SURFACE-BRANCH", 900, ("python3", "-P", "dev/surface-branch-test.py"),
++                     "SURFACE-BRANCH cases=30 pairs=2 scan=4 refusals=8 mutants=4 OK"))
+diff --git a/dev/surface-branch-test.py b/dev/surface-branch-test.py
+new file mode 100644
+index 0000000..23e002a
+--- /dev/null
++++ b/dev/surface-branch-test.py
+@@ -0,0 +1,199 @@
++#!/usr/bin/env python3
++"""Check surface tail branches: guard pairs, nested legs, leg step scans and refusals."""
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++
++import sys
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++import native_mutations
++import shutil
++import subprocess
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parent.parent
++WORK = ROOT / '.gatework/surface-branch'
++spec = importlib.util.spec_from_file_location('core_context', ROOT / 'dev/context-test.py')
++C = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(C)
++C.WORK = WORK
++require = C.require
++FILES = ('runtime.hex', 'init.hex', 'abi.json', 'layout.json', 'axioms.txt')
++
++
++def single(body, extra='', init='sstore limit (word 9) ;'):
++    return f'''contract SingleBranch where
++  storage State := {{ cell : Word ; limit : Word }}
++  {extra}
++  entry keep (x : Word) : Eff Sig Word := do
++    {body}
++  constructor := do {init} pure ()
++'''
++
++
++def pair_cases():
++    return [
++        ('guard-tail', 'lim <- sload limit ; guard le x lim ; sstore cell x ; pure x',
++         'lim <- sload limit ; if le x lim then sstore cell x ; pure x else revert'),
++        ('guard-leg', 'lim <- sload limit ; if le x lim then guard le x (word 3) ; sstore cell x ; pure x else pure (word 0)',
++         'lim <- sload limit ; if le x lim then if le x (word 3) then sstore cell x ; pure x else revert else pure (word 0)'),
++    ]
++
++
++def pairs():
++    checked = 0
++    for name, guarded, branched in pair_cases():
++        _path, guard_out, _runtime = C.emit(name + '-guard', single(guarded))
++        _path, branch_out, _runtime = C.emit(name + '-branch', single(branched))
++        for file in FILES:
++            require((guard_out / file).read_bytes() == (branch_out / file).read_bytes(),
++                    'SURFACE-BRANCH-PAIR ' + name + ' ' + file)
++        checked += 1
++    return checked
++
++
++def calldata(name, *argv):
++    return json.loads(C.checked('calldata-' + name, [C.BINARY, 'calldata-encode', *argv]))['calldata']
++
++
++def outcome(name, path, runtime, data, caller, want, slots, marker):
++    argv = [C.BINARY, 'run', path, '--calldata', data, '--caller', hex(caller)]
++    for slot, stored in slots.items():
++        argv += ['--storage', f'{int(slot, 16)}={int(stored, 16)}']
++    model = json.loads(C.checked('model-' + name, argv))
++    actual, _ = C.evm_run(name, runtime, data, caller, slots=slots)
++    require(model == want, marker + '-MODEL ' + name)
++    require(actual == want, marker + '-EVM ' + name)
++
++
++def word(value):
++    return f'0x{value:064x}'
++
++
++def live():
++    path, output, runtime = C.emit('settle', (ROOT / 'examples/SurfaceBranch.asy').read_text())
++    abi = json.loads((output / 'abi.json').read_text())
++    require({row['name']: row['stateMutability'] for row in abi if row['type'] == 'function'} == dict(settle='nonpayable'),
++            'SURFACE-BRANCH-ABI')
++    cases = 0
++    for bonus in (0, 5, 2**255):
++        data = calldata(f'settle-{bonus}', 'settle', 'uint256', str(bonus))
++        for verdict in (0, 1, 2, 3, 2**256 - 1):
++            for caller in (0, C.SENDER):
++                name = f'settle-{bonus}-{verdict}-{caller:x}'
++                before = {'1': '0x64', **({'0': hex(verdict)} if verdict else {})}
++                legs = {
++                    1: (word(100 + bonus), {**before, '1': hex(100 + bonus)}),
++                    0: (word(0), {**before, **({'2': hex(caller)} if caller else {})}),
++                    2: (word(2), before),
++                }
++                result, storage = legs.get(verdict, ('0x', before))
++                status = 'success' if verdict in legs else 'revert'
++                want = dict(status=status, output=result, storage=storage)
++                outcome(name, path, runtime, data, caller, want, before, 'SURFACE-BRANCH')
++                cases += 1
++    return cases
++
++
++def scan():
++    source = single('if le x (word 5) then sender <- caller ; pure sender else pure (word 0)')
++    path, output = WORK / 'scan.asy', WORK / 'scan'
++    path.write_text(source)
++    emitted = C.capture('emit-scan', [C.BINARY, 'emit', path, '-o', output])
++    require(emitted.returncode == 0, 'SURFACE-BRANCH-SCAN emit: ' + emitted.stderr)
++    runtime = (output / 'runtime.hex').read_text().strip().removeprefix('0x')
++    abi = json.loads((output / 'abi.json').read_text())
++    require([row['stateMutability'] for row in abi if row['type'] == 'function'] == ['view'], 'SURFACE-BRANCH-SCAN abi')
++    cases = 0
++    for x, caller in ((1, 0x42), (5, C.SENDER), (6, 0x42), (2**256 - 1, C.SENDER)):
++        data = calldata(f'scan-{x}', 'keep', 'uint256', str(x))
++        want = dict(status='success', output=word(caller if x <= 5 else 0), storage={'1': '0x9'})
++        outcome(f'scan-{x}', path, runtime, data, caller, want, {'1': '0x9'}, 'SURFACE-BRANCH-SCAN')
++        cases += 1
++    return cases
++
++
++def negative_cases():
++    return [
++        ('trailing', single('if le x (word 1) then pure x else pure (word 2) ; pure x'), 'SURFACE_BRANCH'),
++        ('nested-trailing', single('if le x (word 1) then if le x (word 0) then pure x else pure x ; pure x else pure x'),
++         'SURFACE_BRANCH'),
++        ('not-le', single('if x then pure x else pure (word 2)'), 'SURFACE_BRANCH'),
++        ('missing-else', single('if le x (word 1) then pure x'), 'SURFACE_SYNTAX'),
++        ('constructor', single('pure x', init='if le (word 1) (word 2) then pure () else pure () ;'), 'SURFACE_BRANCH'),
++        ('leg-scope', single('if le x (word 1) then sender <- caller ; pure sender else pure sender'), 'SURFACE_SCOPE'),
++        ('reserved-field', single('pure x').replace('cell : Word', 'else : Word'), 'SURFACE_NAME'),
++        ('reserved-binding', single('then <- caller ; pure then'), 'SURFACE_NAME'),
++    ]
++
++
++def refusals(only=None):
++    rows = negative_cases()
++    require(only is None or only in {name for name, _source, _marker in rows},
++            'SURFACE-BRANCH-REFUSAL unknown ' + str(only))
++    checked = 0
++    for name, source, marker in rows:
++        if only is not None and name != only:
++            continue
++        path = WORK / (name + '.asy')
++        path.write_text(source)
++        output = WORK / (name + '-out')
++        for command in (['check', path], ['emit', path, '-o', output], ['run', path, '--calldata', '0x']):
++            result = C.capture(name + '-' + command[0], [C.BINARY, *command])
++            require(result.returncode == 1 and marker in result.stdout + result.stderr and not output.exists(),
++                    'SURFACE-BRANCH-REFUSAL ' + name + ' ' + command[0])
++        checked += 1
++    return checked
++
++
++def mutants():
++    cases = native_mutations.load(__file__)
++    records = []
++    with tempfile.TemporaryDirectory(prefix='assay-surface-branch-mutants-') as temporary:
++        copy = Path(temporary) / 'copy'
++        native_mutations.copy_project(ROOT, copy)
++        path = copy / 'src/emitter.bend'
++        original = path.read_text()
++        for name, before, after, witness, marker in cases:
++            require(native_mutations.count(original, before) == 1, 'SURFACE-BRANCH-MUTANT anchor ' + name)
++            for mutated in (True, False):
++                path.write_text(native_mutations.replace(original, before, after) if mutated else original)
++                label = ('mutant-' if mutated else 'control-') + name
++                build = C.capture(label + '-build', ['zsh', '-f', 'dev/build.sh', 'build', 'bin/assay'], cwd=copy, timeout=120)
++                require(build.returncode == 0, 'SURFACE-BRANCH-MUTANT build ' + label)
++                result = C.capture(label, ['python3', '-P', 'dev/surface-branch-test.py', witness], cwd=copy, timeout=180)
++                require(result.returncode == (1 if mutated else 0) and (not mutated or marker in result.stdout),
++                        'SURFACE-BRANCH-MUTANT witness ' + label)
++                records.append(dict(name=label, exit=result.returncode, marker=marker,
++                                    source_sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
++            print('SURFACE-BRANCH-MUTANT ' + name + ' killed control=OK', flush=True)
++    C.save('MUTANTS', records)
++    return len(cases)
++
++
++def main():
++    commands = dict(live=live, pairs=pairs, scan=scan, refusals=refusals, mutants=mutants,
++                    trailing=lambda: refusals('trailing'))
++    if sys.argv[1:] and sys.argv[1:] not in [[name] for name in commands]:
++        return 64
++    shutil.rmtree(WORK, ignore_errors=True)
++    WORK.mkdir(parents=True, exist_ok=True)
++    if sys.argv[1:]:
++        result = commands[sys.argv[1]]()
++        print(f'SURFACE-BRANCH {sys.argv[1]} {result} OK', flush=True)
++    else:
++        cases, paired, scanned = live(), pairs(), scan()
++        invalid, killed = refusals(), mutants()
++        print(f'SURFACE-BRANCH cases={cases} pairs={paired} scan={scanned} refusals={invalid} mutants={killed} OK',
++              flush=True)
++    return 0
++
++
++if __name__ == '__main__':
++    try:
++        sys.exit(main())
++    except (OSError, ValueError, subprocess.SubprocessError) as error:
++        print('SURFACE-BRANCH FAIL ' + str(error), flush=True)
++        sys.exit(1)
+diff --git a/dev/trusted-lines.py b/dev/trusted-lines.py
+index 4bd2b65..86a0fde 100644
+--- a/dev/trusted-lines.py
++++ b/dev/trusted-lines.py
+@@ -10,2 +10,2 @@ KERNEL_BOUND = 4000
+-ARTIFACTS = {'emitter': 1800, 'assembler': 505, 'keccak': 250, 'abi': 495, 'layout': 250, 'listing': 250}
+-RATIFIED_TOTAL = 3550
++ARTIFACTS = {'emitter': 1815,'assembler': 505, 'keccak': 250, 'abi': 495, 'layout': 250, 'listing': 250}
++RATIFIED_TOTAL = 3565
+diff --git a/examples/SurfaceBranch.asy b/examples/SurfaceBranch.asy
+new file mode 100644
+index 0000000..4e85bd9
+--- /dev/null
++++ b/examples/SurfaceBranch.asy
+@@ -0,0 +1,15 @@
++contract SurfaceBranch where
++  storage State := { verdict : Word ; ledger : Word ; last : Word }
++  entry settle (bonus : Word) : Eff Sig Word := do
++    d <- sload verdict ;
++    if le d (word 1) then
++      if le (word 1) d then
++        b <- sload ledger ; c <- add b bonus ; sstore ledger c ; pure c
++      else
++        sender <- caller ; sstore last sender ; pure (word 0)
++    else
++      if le d (word 2) then
++        pure (word 2)
++      else
++        revert
++  constructor := do sstore ledger (word 100) ; pure ()
+diff --git a/src/emitter.bend b/src/emitter.bend
+index d4f3b0e..956e3d6 100644
+--- a/src/emitter.bend
++++ b/src/emitter.bend
+@@ -66,0 +67 @@ type Contract.Ending is Data:
++  Contract.Ending.Branch{a0: Contract.Token, a1: Contract.Word, a2: Contract.Word, a3: Tuple2<&2, &2, List<&2, Contract.Step>, Contract.Ending>, a4: Tuple2<&2, &2, List<&2, Contract.Step>, Contract.Ending>}
+@@ -404 +405 @@ def Get.Contract.Error_row.error_args(value: Contract.Error_row) -> ListOf(Contr
+-def Match.Contract_Ending(r, -R: Kind(r), value: Contract.Ending, on0: (@+a0:Contract.Word -> R), on1: (@+a0:Contract.Token -> R), on2: (@+a0:Contract.Token -> R), on3: (@+a0:Contract.Token -> @+a1:ListOf(Contract.Word) -> R)) -> R:
++def Match.Contract_Ending(r, -R: Kind(r), value: Contract.Ending, on0: (@+a0:Contract.Word -> R), on1: (@+a0:Contract.Token -> R), on2: (@+a0:Contract.Token -> R), on3: (@+a0:Contract.Token -> @+a1:ListOf(Contract.Word) -> R), on4: (@+a0:Contract.Token -> @+a1:Contract.Word -> @+a2:Contract.Word -> @+a3:TupleOf2(ListOf(Contract.Step), Contract.Ending) -> @+a4:TupleOf2(ListOf(Contract.Step), Contract.Ending) -> R)) -> R:
+@@ -409,0 +411 @@ def Match.Contract_Ending(r, -R: Kind(r), value: Contract.Ending, on0: (@+a0:Con
++    case Contract.Ending.Branch{a0, a1, a2, a3, a4}: on4(a0, a1, a2, a3, a4)
+@@ -1104 +1106 @@ def Contract.reserved() -> ListOf(String):
+-  List.append(&2, String, Con{"Both", Con{"EqWord", Con{"eqWord", Con{"predicate", Con{"caller", Con{"callvalue", Con{"calldatasize", Con{"calldataload", Con{"address", Con{"deployer", Con{"fallback", Con{"Never", Con{"payable", Nil{}}}}}}}}}}}}}}, NativeString.split(Char.from_u32(32), "contract where storage entry constructor error invariant proof do sload sstore add sub guard le let pure revert Word Eff Sig Tx ResultWord Storage Entry Error main word ret put read EvmOpcodes done store load abort reject def axiom fun inj of case match as return with tuple sum prod absurd Prop Type in auto mu mutual end nu and rec natAdd natSub natMul natEq natLt Le Lt256 AddFits leWord lt256 wordNat guardLe guardAdd addLt subLe"))
++  List.append(&2, String, Con{"Both", Con{"EqWord", Con{"eqWord", Con{"predicate", Con{"caller", Con{"callvalue", Con{"calldatasize", Con{"calldataload", Con{"address", Con{"deployer", Con{"fallback", Con{"Never", Con{"payable", Nil{}}}}}}}}}}}}}}, NativeString.split(Char.from_u32(32), "contract where storage entry constructor error invariant proof do sload sstore add sub guard le let pure revert if then else Word Eff Sig Tx ResultWord Storage Entry Error main word ret put read EvmOpcodes done store load abort reject def axiom fun inj of case match as return with tuple sum prod absurd Prop Type in auto mu mutual end nu and rec natAdd natSub natMul natEq natLt Le Lt256 AddFits leWord lt256 wordNat guardLe guardAdd addLt subLe"))
+@@ -1300 +1302 @@ def Case.Contract.branch11264(+p11221: ListOf(Contract.Token), +scrut11214: Reus
+-def Local.Contract.steps.f11204(+count_1267: Big, +acc_1268: ListOf(Contract.Step), +tokens_1269: ListOf(Contract.Token)) -> CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))):
++def Local.Contract.steps.base(+count_1267: Big, +acc_1268: ListOf(Contract.Step), +tokens_1269: ListOf(Contract.Token)) -> CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))):
+@@ -1338,0 +1341,12 @@ def Contract.body(+tokens_1264: ListOf(Contract.Token)) -> CheckResult(TupleOf2(
++def Local.Contract.steps.f11204(+count_1267: Big, +acc_1268: ListOf(Contract.Step), +tokens_1269: ListOf(Contract.Token)) -> CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))):
++  Native.choose(&2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.leads("if", tokens_1269), _ => (Contract.branch(count_1267, acc_1268, tokens_1269)), _ => (Local.Contract.steps.base(count_1267, acc_1268, tokens_1269)))
++@unsafe
++def Contract.leads(+text_90001: String, +tokens_90002: ListOf(Contract.Token)) -> Bool:
++  Match.List(&2, Contract.Token, &2, Bool, tokens_90002, _ => (False{}), +p90003 => +p90004 => (NativeString.equal(Get.Contract.Token.text(p90003), text_90001)))
++@unsafe
++def Contract.branch(+count_90010: Big, +acc_90011: ListOf(Contract.Step), +tokens_90012: ListOf(Contract.Token)) -> CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))):
++  Match.List(&2, Contract.Token, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), tokens_90012, _ => (Contract.fail(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), Contract.here(tokens_90012), "BRANCH", "expected if")), +if_90013 => +after_90014 => (Native.choose(&2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.leads("le", after_90014), _ => (Match.Result(&2, ListOf(Contract.Token), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.expect("le", after_90014), +le_90015 => (Match.Result(&2, TupleOf2(Contract.Word, ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.value(Big.zero(), le_90015), +left_90016 => (Match.Tuple2(&2, Contract.Word, &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), left_90016, +lw_90017 => +ll_90018 => (Match.Result(&2, TupleOf2(Contract.Word, ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.value(Big.zero(), ll_90018), +right_90019 => (Match.Tuple2(&2, Contract.Word, &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), right_90019, +rw_90050 => +rl_90051 => (Match.Result(&2, ListOf(Contract.Token), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.expect("then", rl_90051), +then_90052 => (Match.Result(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Local.Contract.steps.f11204(count_90010, Nil{}, then_90052), +tleg_90053 => (Match.Tuple2(&2, TupleOf2(ListOf(Contract.Step), Contract.Ending), &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), tleg_90053, +tbody_90054 => +tl_90055 => (Match.Result(&2, ListOf(Contract.Token), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.expect("else", tl_90055), +else_90056 => (Match.Result(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), &2, Error, &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Local.Contract.steps.f11204(count_90010, Nil{}, else_90056), +eleg_90057 => (Match.Tuple2(&2, TupleOf2(ListOf(Contract.Step), Contract.Ending), &2, ListOf(Contract.Token), &2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), eleg_90057, +ebody_90058 => +rest_90059 => (Native.choose(&2, CheckResult(TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token))), Contract.leads(";", rest_90059), _ => (Contract.fail(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), Contract.here(rest_90059), "BRANCH", "if must end the body")), _ => (Done{Tup2{Tup2{List.reverse(&2, Contract.Step, acc_90011), Contract.Ending.Branch{if_90013, lw_90017, rw_90050, tbody_90054, ebody_90058}}, rest_90059}}))))), +e_90060 => Fail{e_90060})), +e_90061 => Fail{e_90061})))), +e_90062 => Fail{e_90062})), +e_90063 => Fail{e_90063})))), +e_90064 => Fail{e_90064})))), +e_90065 => Fail{e_90065})), +e_90066 => Fail{e_90066})), _ => (Contract.fail(&2, TupleOf2(TupleOf2(ListOf(Contract.Step), Contract.Ending), ListOf(Contract.Token)), if_90013, "BRANCH", "if takes le a b then BODY else BODY")))))
++@unsafe
++def Contract.all_steps(+body_90070: TupleOf2(ListOf(Contract.Step), Contract.Ending)) -> ListOf(Contract.Step):
++  List.append(&2, Contract.Step, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, body_90070), Match.Contract_Ending(&2, ListOf(Contract.Step), Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, body_90070), +w_90071 => (Nil{}), +t_90072 => (Nil{}), +t_90073 => (Nil{}), +t_90074 => +v_90075 => (Nil{}), +t_90076 => +l_90077 => +r_90078 => +then_90079 => +else_90080 => (List.append(&2, Contract.Step, Contract.all_steps(then_90079), Contract.all_steps(else_90080)))))
++@unsafe
+@@ -1603 +1617 @@ Match.Contract_Ending(&2, CheckResult(String), scrut12939, +p12940 => (Match.Res
+-obligations_1922(scrut12949, state_1945, evidence_1947, "Tx", Contract.app("done", Con{local12943, Nil{}})))))(item12950)), +item12951 => Fail{item12951})), +p12952 => (Contract.fail(&2, String, p12952, "RETURN", "an entry must return Word")), +p12953 => (Done{"abort"}), +p12954 => +p12955 => (reject_1923(env_1944, Tup2{p12954, p12955})))))), +p12957 => +p12958 => ((+scrut12971 = {(+local12964 => +local12966 => +local12968 => +local12970 => (Contract.proof(None{}, Some{evidence_1947}, predicates_1916, helpers_1917, local12964, local12966, local12968, local12970))) : Reusable(Big, Reusable(ListOf(TupleOf2(String, Contract.Binding)), Reusable(OptionOf(Contract.Resolved_claim), Reusable(Contract.Proof, CheckResult(TupleOf2(Contract.Resolved_claim, String))))))}
++obligations_1922(scrut12949, state_1945, evidence_1947, "Tx", Contract.app("done", Con{local12943, Nil{}})))))(item12950)), +item12951 => Fail{item12951})), +p12952 => (Contract.fail(&2, String, p12952, "RETURN", "an entry must return Word")), +p12953 => (Done{"abort"}), +p12954 => +p12955 => (reject_1923(env_1944, Tup2{p12954, p12955})), +branch_at_90020 => +branch_left_90021 => +branch_right_90022 => +branch_then_90023 => +branch_else_90024 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, branch_left_90021), +left_90025 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Contract.word(env_1944, branch_right_90022), +right_90026 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Local.Contract.lower.f12919(Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_then_90023), invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_then_90023)), +then_90027 => (Match.Result(&2, String, &2, Error, &2, CheckResult(String), Local.Contract.lower.f12919(Get.Tuple2.v1(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_else_90024), invariants_1915, obligations_1922, reject_1923, predicates_1916, helpers_1917, fields_1913, resolved_claim_1921, index_1943, env_1944, state_1945, written_1946, evidence_1947, Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, branch_else_90024)), +else_90028 => (Done{Contract.app("le", Con{left_90025, Con{right_90026, Con{then_90027, Con{else_90028, Nil{}}}}})}), +e_90029 => Fail{e_90029})), +e_90030 => Fail{e_90030})), +e_90031 => Fail{e_90031})), +e_90032 => Fail{e_90032})))))), +p12957 => +p12958 => ((+scrut12971 = {(+local12964 => +local12966 => +local12968 => +local12970 => (Contract.proof(None{}, Some{evidence_1947}, predicates_1916, helpers_1917, local12964, local12966, local12968, local12970))) : Reusable(Big, Reusable(ListOf(TupleOf2(String, Contract.Binding)), Reusable(OptionOf(Contract.Resolved_claim), Reusable(Contract.Proof, CheckResult(TupleOf2(Contract.Resolved_claim, String))))))}
+@@ -1629 +1643 @@ def Contract.constructor(+fields_2058: ListOf(TupleOf2(String, String)), +param_
+-  Match.Contract_Ending(&2, CheckResult(Unit), scrut13363, +p13364 => (Match.Contract_Word(&2, CheckResult(Unit), p13364, +p13365 => (Contract.fail(&2, Unit, p13365, "CONSTRUCTOR", "constructor must end in pure ()")), +p13366 => (Contract.fail(&2, Unit, p13366, "CONSTRUCTOR", "constructor must end in pure ()")))), +p13367 => (Done{Unit{}}), +p13368 => (Contract.fail(&2, Unit, p13368, "CONSTRUCTOR", "constructor must end in pure ()")), +p13369 => +p13370 => (Contract.fail(&2, Unit, p13369, "CONSTRUCTOR", "constructor must end in pure ()")))), +item13433 => ((+local13372 => ((+scrut13373 = local13372
++  Match.Contract_Ending(&2, CheckResult(Unit), scrut13363, +p13364 => (Match.Contract_Word(&2, CheckResult(Unit), p13364, +p13365 => (Contract.fail(&2, Unit, p13365, "CONSTRUCTOR", "constructor must end in pure ()")), +p13366 => (Contract.fail(&2, Unit, p13366, "CONSTRUCTOR", "constructor must end in pure ()")))), +p13367 => (Done{Unit{}}), +p13368 => (Contract.fail(&2, Unit, p13368, "CONSTRUCTOR", "constructor must end in pure ()")), +p13369 => +p13370 => (Contract.fail(&2, Unit, p13369, "CONSTRUCTOR", "constructor must end in pure ()")), +branch_at_90040 => +branch_left_90041 => +branch_right_90042 => +branch_then_90043 => +branch_else_90044 => (Contract.fail(&2, Unit, branch_at_90040, "BRANCH", "a constructor cannot branch")))), +item13433 => ((+local13372 => ((+scrut13373 = local13372
+@@ -1655 +1669 @@ Done{List.append(&2, String, local13624, Con{String.append("| ", String.append(B
+-Match.Contract_Step(&2, Bool, scrut13679, +p13680 => +p13681 => (False{}), +p13682 => +p13683 => (False{}), +p13684 => (False{}), +p13685 => +p13686 => +p13687 => (False{}), +p13688 => +p13689 => +p13690 => (False{}), +p13691 => +p13692 => (False{}), +p13693 => +p13694 => (False{}), +p13695 => +p13696 => (False{}), +p13697 => +p13698 => +p13699 => +p13700 => (True{}), +p13701 => +p13702 => +p13703 => +p13704 => +p13705 => (True{}), +p13706 => +p13707 => +p13708 => (True{}))))), Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, Get.Contract.Entry.body(local13676))))), entries_2091))))) : Bool}
++Match.Contract_Step(&2, Bool, scrut13679, +p13680 => +p13681 => (False{}), +p13682 => +p13683 => (False{}), +p13684 => (False{}), +p13685 => +p13686 => +p13687 => (False{}), +p13688 => +p13689 => +p13690 => (False{}), +p13691 => +p13692 => (False{}), +p13693 => +p13694 => (False{}), +p13695 => +p13696 => (False{}), +p13697 => +p13698 => +p13699 => +p13700 => (True{}), +p13701 => +p13702 => +p13703 => +p13704 => +p13705 => (True{}), +p13706 => +p13707 => +p13708 => (True{}))))), Contract.all_steps(Get.Contract.Entry.body(local13676))))), entries_2091))))) : Bool}
+@@ -1657 +1671 @@ Match.Contract_Step(&2, Bool, scrut13679, +p13680 => +p13681 => (False{}), +p136
+-Match.Contract_Step(&2, Bool, scrut13716, +p13717 => +p13718 => (False{}), +p13719 => +p13720 => (NativeString.equal(Recognize.context_name(&2, Contract.Word, p13719), Recognize.context_name(&2, Unit, local13711))), +p13721 => (False{}), +p13722 => +p13723 => +p13724 => (False{}), +p13725 => +p13726 => +p13727 => (False{}), +p13728 => +p13729 => (False{}), +p13730 => +p13731 => (False{}), +p13732 => +p13733 => (False{}), +p13734 => +p13735 => +p13736 => +p13737 => (False{}), +p13738 => +p13739 => +p13740 => +p13741 => +p13742 => (False{}), +p13743 => +p13744 => +p13745 => (False{}))))), Get.Tuple2.v0(&2, ListOf(Contract.Step), &2, Contract.Ending, Get.Contract.Entry.body(local13713))))), entries_2091))), Recognize.contexts()) : ListOf(Recognize.Context<&2, Unit>)}
++Match.Contract_Step(&2, Bool, scrut13716, +p13717 => +p13718 => (False{}), +p13719 => +p13720 => (NativeString.equal(Recognize.context_name(&2, Contract.Word, p13719), Recognize.context_name(&2, Unit, local13711))), +p13721 => (False{}), +p13722 => +p13723 => +p13724 => (False{}), +p13725 => +p13726 => +p13727 => (False{}), +p13728 => +p13729 => (False{}), +p13730 => +p13731 => (False{}), +p13732 => +p13733 => (False{}), +p13734 => +p13735 => +p13736 => +p13737 => (False{}), +p13738 => +p13739 => +p13740 => +p13741 => +p13742 => (False{}), +p13743 => +p13744 => +p13745 => (False{}))))), Contract.all_steps(Get.Contract.Entry.body(local13713))))), entries_2091))), Recognize.contexts()) : ListOf(Recognize.Context<&2, Unit>)}
