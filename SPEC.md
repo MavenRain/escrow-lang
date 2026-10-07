@@ -327,9 +327,16 @@ behind the ruling are in `probe/CAPABILITY.md`.
   2026-10-06: probes P6, P7 and P8 are done (`probe/CAPABILITY.md`, O11,
   O12). The contract writer (`gen/contract.sh`) and the table step
   (`gen/table.sh`) are written. Both regimes pass `check`, `axioms` and
-  `emit` at members 3. The Bend 2 generator, the refusal test and the
-  kernel differential tests are not started. O12 (b) is now carried as a
-  local compiler patch and `settle` is one entry. `test/settlement.py`
-  checks model and emitted EVM behavior against independent expectations;
-  it does not yet compare either with dependent kernel evaluation.
+  `emit` at members 3. O12 (b) is now carried as a local compiler patch
+  and `settle` is one entry. `test/settlement.py` checks model and emitted
+  EVM behavior against independent expectations. Status 2026-10-07:
+  `test/differential.py` compares dependent kernel evaluation with the
+  contract. The kernel evaluates the rule `F` of the Arrow-Debreu example
+  on all 27 ballot vectors at members 3. Three runs with a wrong candidate
+  give the values as hints, and one kernel file checks all 27 values with
+  `reflNat`. The contract takes its tables from its own constructor run.
+  Then `cast` and `settle` run in the Assay model and in geth, and each
+  result must equal the kernel value. A contract with one wrong table code
+  fails the test. The Bend 2 generator and the refusal test are not
+  started.
 - M2: open items O4 and O7, after a ruling.

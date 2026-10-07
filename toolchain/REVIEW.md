@@ -49,6 +49,7 @@ Assay checkout.
 | Both contract regimes | Check, emit and axiom audit passed; only `EvmOpcodes` |
 | Stored patch | Applies to pinned base; resulting tree `cc81e87dfdb77dad597dfd6c552038ca951bd200` |
 | `shasum -a 256 -c dev/DENOMINATORS.sha256` on the patched tree | Passed (fresh apply and `.tools/assay`); setup reused the cached build; `zsh probe/regression.sh` passed |
+| `python3 -P test/differential.py` (2026-10-07) | 27 ballot vectors at members 3: kernel values certified by `reflNat`, `cast` and `settle` in model and geth equal the kernel; 208 s |
 
 Full command captures are retained locally under `.kanon-exec/`:
 `run-llJFAI` (build), `run-WIY2V4` (generator), `run-IzwvpP`
@@ -57,10 +58,11 @@ The probe pass is in `run-KOUnQJ`; that combined command then failed
 because the trusted-line script was invoked without its root argument.
 The corrected trusted-line invocation subsequently passed.
 
-The upstream 111-leg battery was not run. Kernel-to-contract differential
-testing, the Bend generator and the dialect refusal test remain separate
-M1 work. The settlement regression compares the Assay execution model
-and emitted EVM code with independent expectations, not kernel evaluation.
+The upstream 111-leg battery was not run. The Bend generator and the
+dialect refusal test remain separate M1 work. The settlement regression
+compares the Assay execution model and emitted EVM code with independent
+expectations. `test/differential.py` (added 2026-10-07) compares both with
+dependent kernel evaluation of the program rule.
 
 ## Blockers and verdict
 
