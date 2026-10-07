@@ -280,6 +280,14 @@ behind the ruling are in `probe/CAPABILITY.md`.
   words only) for `check`, `axioms` and `emit`. RULED 2026-10-06 (USER):
   two files. The table comes from the kernel file by the packed code of
   P7. The second `reflNat` check certifies it.
+- O12. Found in M1 (2026-10-06, document read, not ruled;
+  `probe/CAPABILITY.md`, "M1 contract form"): the assay surface form has
+  mappings with runtime keys and no two-way branch. The core `Tx` protocol
+  has the `le` branch and only constant slots. Section 7 needs both.
+  Options: (a) probe P8 first: a core `le` term in a surface body; (b) an
+  assay change that adds a surface branch (the assay tree has work in
+  flight); (c) a ledger of constant slots, one per address in a fixed
+  address set, in the core protocol.
 
 ## 10. Milestones
 
@@ -290,5 +298,5 @@ behind the ruling are in `probe/CAPABILITY.md`.
   tests of kernel evaluation against `assay run` traces. Status
   2026-10-06: probes P6 and P7 are done (`probe/CAPABILITY.md`, O11). The
   contract writer, the generator and the differential tests are not
-  started.
+  started. O12 blocks the contract writer.
 - M2: open items O4 and O7, after a ruling.

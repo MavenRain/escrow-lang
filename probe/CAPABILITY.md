@@ -311,3 +311,28 @@ are (n + 1)(n + 2) / 2 digits. The time for a large n is not measured.
 The wall times in this section are 10 to 50 s for files that took less than
 1 s in M0. The machine had other loads. Do not use these times as a
 benchmark.
+
+## M1 contract form: no form has a branch and a mapping (2026-10-06)
+
+This is a read of the assay documents, not a probe run. The Fable builder
+died on a 429 (req_011Cfn3kFoDtugMaL9frsSRQ). The opus fallback died on
+`reasoning_extraction` (req_011Cfn3p85F47BTV6Hb77kmj). Neither agent wrote
+a file.
+
+- The surface `contract` form has `Mapping K V` storage with runtime keys,
+  `payable`, `callvalue` and `guard` (assay examples MappingAccess.asy,
+  Payable.asy, CallValue.asy). Its statements are `sload`, `caller`,
+  `callvalue`, `calldatasize`, `calldataload`, `add`, `sub`, `sstore`,
+  `guard le a b`, `let`, `pure` and `revert` (assay dev/M1-SURFACE.md:52-64).
+  No statement has two continuations. A `guard` only reverts.
+- The core `Tx` protocol has `le a b yes no` (assay dev/M1-EMISSION.md:84).
+  Its storage slots must be compile-time constants within the declared
+  layout (dev/M1-EMISSION.md:102-103). Mapping slots come from the surface
+  source adapter (dev/M2-MAPPING-RUNTIME.md:20).
+- The contract of SPEC section 7 needs both: the ledger is keyed by a
+  runtime address, and `cast` and `settle` branch on ballot words.
+
+P8 (next probe): can a surface entry body hold a core `le a b yes no`
+term? dev/M1-SURFACE.md says "The core syntax remains available for
+programs that recover from an arithmetic error". It does not say that a
+core term can appear in a surface body. SPEC O12 lists the options.
