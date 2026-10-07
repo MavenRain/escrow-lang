@@ -55,6 +55,36 @@ static void *fail_found(Parser *p, const char *what) {
               token->text.start);
 }
 
+/* SPEC section 2: the assay forms that escrow-lang refuses. */
+static const char *const REFUSED_FORMS[] = {
+  "nu", "axiom", "contract", "storage", "entry", "payable", "constructor", "fallback", "error",
+  "invariant", "predicate", "proof", "guard", "sload", "sstore"
+};
+
+/* The refused form that TOKEN names, or NULL. A form name ends the spine of
+ * an application, so a form after a declaration reaches fail_top. */
+static const char *refused_form(const Token *token) {
+  const char *form = NULL;
+  for (size_t i = 0; token->kind == TOK_NAME && i < sizeof REFUSED_FORMS / sizeof REFUSED_FORMS[0]; i++) {
+    size_t length = strlen(REFUSED_FORMS[i]);
+    int hit = token->text.length == length && memcmp(token->text.start, REFUSED_FORMS[i], length) == 0;
+    form = hit ? REFUSED_FORMS[i] : form;
+  }
+  return form;
+}
+
+/* A declaration starts with neither 'def' nor 'mu'. */
+static void fail_top(Parser *p) {
+  const Token *token = peek(p);
+  const char *form = refused_form(token);
+  if (form != NULL) {
+    p->def = span_of("-");
+    fail(p, "REFUSE_FORM", token->loc, "escrow-lang refuses the %s form", form);
+    return;
+  }
+  fail_found(p, "'def' or 'mu'");
+}
+
 static void *no_memory(Parser *p, Loc loc) {
   return fail(p, "MEMORY", loc, "no memory for the AST");
 }
@@ -178,9 +208,9 @@ static int parse_binder(Parser *p, Binder *binder) {
   return binder->type != NULL && expect_close(p, open->loc) != NULL;
 }
 
-/* An atom starts here: NAME, NUMBER or '('. */
+/* An atom starts here: NAME (not a refused form), NUMBER or '('. */
 static int atom_start(const Parser *p) {
-  return at(p, TOK_NAME) || at(p, TOK_NUMBER) || at(p, TOK_LPAREN);
+  return (at(p, TOK_NAME) && refused_form(peek_at(p, 0)) == NULL) || at(p, TOK_NUMBER) || at(p, TOK_LPAREN);
 }
 
 /* '(' term ')' or the pair '(' term ',' term ')'. */
@@ -595,7 +625,7 @@ int escrow_parse(Arena *arena, const char *file, const char *text, size_t size, 
   size_t cap = 0;
   while (!at(&p, TOK_EOF)) {
     if (!at(&p, TOK_DEF) && !at(&p, TOK_MU)) {
-      fail_found(&p, "'def' or 'mu'");
+      fail_top(&p);
       return ESCROW_EXIT_REFUSED;
     }
     program->decls = grow(&p, program->decls, program->ndecls, &cap, sizeof *program->decls);

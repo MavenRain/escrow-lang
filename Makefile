@@ -7,8 +7,8 @@ TCCFLAGS = -std=c99 -Wall -Werror
 CLANGFLAGS = -std=c99 -Wall -Wextra -Wswitch-enum -Werror -fsyntax-only
 
 FRONT = src/arena.c src/diag.c src/lexer.c src/parser.c src/printer.c
-ESCROWC = $(FRONT) src/evm.c src/keccak.c src/main.c
-HEADERS = src/arena.h src/evm.h src/keccak.h src/prelude.h src/syntax.h
+ESCROWC = $(FRONT) src/check.c src/evm.c src/keccak.c src/main.c
+HEADERS = src/arena.h src/check.h src/evm.h src/keccak.h src/prelude.h src/syntax.h
 PRELUDE = prelude/Prelude.esc
 
 all: build/escrowc build/parsetool
@@ -28,6 +28,9 @@ check-clang: build/prelude.c
 
 test: build/escrowc build/parsetool
 	sh test/parse.sh
+	sh test/check.sh
+	sh test/refusal.sh
+	python3 test/normal-forms.py
 
 clean:
 	rm -rf build

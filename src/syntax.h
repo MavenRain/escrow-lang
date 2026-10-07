@@ -47,11 +47,14 @@ typedef struct { const char *start; size_t length; } Span;
 enum { DIAG_DEF = 64, DIAG_TEXT = 384 };
 
 /* The first error of a run, written as "escrowc: CODE: DEF: TEXT". DEF is
- * the declaration in which the error lies, or "-". */
+ * the declaration in which the error lies, or "-". A type mismatch adds
+ * " expected E, found F" with both normal forms. */
 typedef struct {
   const char *code;  /* NULL while there is no error */
   char def[DIAG_DEF];
   char text[DIAG_TEXT];
+  const struct Ast *expected;  /* NULL, or the expected normal form */
+  const struct Ast *found;     /* NULL, or the normal form found */
 } Diag;
 
 Span span_of(const char *text);

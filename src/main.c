@@ -5,20 +5,24 @@
  *   escrowc eval PROG NAME                the normal form of NAME
  *   escrowc build PROG [--runtime] -o OUT the contract
  * Exit 0 ok, 1 refused, 2 usage or IO; errors go to stderr as
- * "escrowc: CODE: DEF: message". This front end parses the embedded prelude
- * and PROG, then refuses each verb with UNIMPLEMENTED until the checker
- * lands. */
+ * "escrowc: CODE: DEF: message". Each verb parses the embedded prelude and
+ * PROG and checks them (src/check.h) first. */
+#include "check.h"
 #include "prelude.h"
-#include "syntax.h"
+#include <errno.h>
 #include <string.h>
+
+typedef enum { VERB_CHECK, VERB_TABLE, VERB_VERDICTS, VERB_EVAL, VERB_BUILD } VerbKind;
 
 typedef struct {
   const char *name;
+  VerbKind kind;
   int argc;  /* argc with the verb, PROG and NAME; build adds -o OUT */
 } Verb;
 
 static const Verb VERBS[] = {
-  {"check", 3}, {"table", 3}, {"verdicts", 4}, {"eval", 4}, {"build", 5}
+  {"check", VERB_CHECK, 3}, {"table", VERB_TABLE, 3}, {"verdicts", VERB_VERDICTS, 4},
+  {"eval", VERB_EVAL, 4}, {"build", VERB_BUILD, 5}
 };
 
 static int usage(void) {
@@ -41,12 +45,69 @@ static int build_fits(int argc, char **argv) {
 }
 
 static int arguments_fit(const Verb *verb, int argc, char **argv) {
-  if (strcmp(verb->name, "build") == 0)
+  if (verb->kind == VERB_BUILD)
     return build_fits(argc, argv);
   return argc == verb->argc;
 }
 
-static int run(Arena *arena, const Verb *verb, const char *path, Diag *diag) {
+static const char *regime_name(const EscrowChecked *checked) {
+  return escrow_regime(checked) == ESCROW_REGIME_DEBREU ? "debreu" : "impossibility";
+}
+
+static int verb_table(EscrowChecked *checked) {
+  const unsigned char *codes = NULL;
+  size_t count = 0;
+  int status = escrow_table(checked, &codes, &count);
+  if (status != ESCROW_EXIT_OK)
+    return status;
+  printf("%s %u", regime_name(checked), escrow_members(checked));
+  for (size_t i = 0; i < count; i++)
+    printf(" %u", (unsigned)codes[i]);
+  putchar('\n');
+  return ESCROW_EXIT_OK;
+}
+
+/* build PROG [--runtime] -o OUT: OUT is the last argument. */
+static int verb_build(EscrowChecked *checked, Diag *diag, int argc, char **argv) {
+  EscrowContract contract;
+  int status = escrow_table(checked, &contract.codes, &contract.count);
+  if (status != ESCROW_EXIT_OK)
+    return status;
+  contract.members = escrow_members(checked);
+  contract.regime = escrow_regime(checked);
+  const char *path = argv[argc - 1];
+  FILE *out = fopen(path, "w");
+  if (out == NULL) {
+    diag_set(diag, "IO_WRITE", span_of("-"), "%s: %s", path, strerror(errno));
+    return ESCROW_EXIT_USAGE;
+  }
+  EscrowPart part = argc == 6 ? ESCROW_PART_RUNTIME : ESCROW_PART_CREATION;
+  int failed = escrow_evm_write(&contract, part, out, stderr);
+  int closed = fclose(out);
+  if (failed)
+    return ESCROW_EXIT_REFUSED;
+  if (closed != 0) {
+    diag_set(diag, "IO_WRITE", span_of("-"), "%s: %s", path, strerror(errno));
+    return ESCROW_EXIT_USAGE;
+  }
+  return ESCROW_EXIT_OK;
+}
+
+static int run_verb(EscrowChecked *checked, const Verb *verb, Diag *diag, int argc, char **argv) {
+  switch (verb->kind) {
+  case VERB_CHECK:
+    printf("ok %s\n", regime_name(checked));
+    return ESCROW_EXIT_OK;
+  case VERB_TABLE: return verb_table(checked);
+  case VERB_VERDICTS: return escrow_verdicts(checked, argv[3], stdout);
+  case VERB_EVAL: return escrow_eval(checked, argv[3], stdout);
+  case VERB_BUILD: return verb_build(checked, diag, argc, argv);
+  }
+  return ESCROW_EXIT_USAGE;
+}
+
+static int run(Arena *arena, const Verb *verb, Diag *diag, int argc, char **argv) {
+  const char *path = argv[2];
   Program prelude;
   const char *prelude_text = (const char *)escrow_prelude_text;
   int status = escrow_parse(arena, escrow_prelude_name, prelude_text, escrow_prelude_size, &prelude, diag);
@@ -61,8 +122,11 @@ static int run(Arena *arena, const Verb *verb, const char *path, Diag *diag) {
   status = escrow_parse(arena, path, text, size, &program, diag);
   if (status != ESCROW_EXIT_OK)
     return status;
-  diag_set(diag, "UNIMPLEMENTED", span_of("-"), "escrowc %s is not implemented yet", verb->name);
-  return ESCROW_EXIT_REFUSED;
+  EscrowChecked *checked = NULL;
+  status = escrow_check(arena, &prelude, &program, &checked, diag);
+  if (status != ESCROW_EXIT_OK)
+    return status;
+  return run_verb(checked, verb, diag, argc, argv);
 }
 
 int main(int argc, char **argv) {
@@ -73,7 +137,8 @@ int main(int argc, char **argv) {
   Diag diag;
   arena_init(&arena, ESCROW_ARENA_MAX);
   diag_init(&diag);
-  int status = run(&arena, verb, argv[2], &diag);
+  int status = run(&arena, verb, &diag, argc, argv);
+  fflush(stdout);
   diag_print(&diag, stderr);
   arena_free(&arena);
   return status;

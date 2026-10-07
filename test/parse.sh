@@ -64,7 +64,7 @@ refuse deep-parens PARSE_DEPTH x "def x : Nat := $(awk 'BEGIN { for (i = 0; i < 
 refuse deep-arrows PARSE_DEPTH x "def x : $(awk 'BEGIN { for (i = 0; i < 5000; i++) printf "Nat -> " }')Nat := 0"
 refuse long-spine PARSE_DEPTH x "def x : Nat := f$(awk 'BEGIN { for (i = 0; i < 5000; i++) printf " 0" }')"
 
-# escrowc: usage and IO exit 2, a verb exits 1 until the checker lands.
+# escrowc: usage and IO exit 2, a refused file exits 1, a checked program exits 0.
 "$escrowc" > /dev/null 2> "$out/usage.err"
 check "escrowc with no verb is usage" $? 2 "$out/usage.err" "escrowc: USAGE: -: "
 "$escrowc" frob x > /dev/null 2> "$out/usage.err"
@@ -79,10 +79,10 @@ check "escrowc check of a missing file is IO" $? 2 "$out/io.err" "escrowc: IO_RE
 check "escrowc check of a bad file is refused" $? 1 "$out/refused.err" "escrowc: LEX_TOKEN: x: "
 for verb in check table; do
   "$escrowc" $verb "$root/examples/programs/arrow-debreu.esc" > /dev/null 2> "$out/verb.err"
-  check "escrowc $verb is a clean refusal" $? 1 "$out/verb.err" "escrowc: UNIMPLEMENTED: -: "
+  check "escrowc $verb of arrow-debreu exits 0" $? 0 "$out/verb.err" ""
 done
 "$escrowc" build "$root/examples/programs/arrow-impossibility.esc" --runtime -o "$out/x.hex" > /dev/null 2> "$out/verb.err"
-check "escrowc build is a clean refusal" $? 1 "$out/verb.err" "escrowc: UNIMPLEMENTED: -: "
+check "escrowc build --runtime of arrow-impossibility exits 0" $? 0 "$out/verb.err" ""
 
 if [ "$failures" -eq 0 ]; then echo "parse.sh: all passed"; exit 0; fi
 echo "parse.sh: $failures failed"

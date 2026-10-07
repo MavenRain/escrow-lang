@@ -12,6 +12,8 @@ void diag_init(Diag *diag) {
   diag->code = NULL;
   diag->def[0] = '\0';
   diag->text[0] = '\0';
+  diag->expected = NULL;
+  diag->found = NULL;
 }
 
 static void diag_begin(Diag *diag, const char *code, Span def) {
@@ -44,7 +46,14 @@ void diag_vat(Diag *diag, const char *code, Span def, const char *file, Loc loc,
 void diag_print(const Diag *diag, FILE *err) {
   if (diag->code == NULL)
     return;
-  fprintf(err, "escrowc: %s: %s: %s\n", diag->code, diag->def, diag->text);
+  fprintf(err, "escrowc: %s: %s: %s", diag->code, diag->def, diag->text);
+  if (diag->expected != NULL && diag->found != NULL) {
+    fputs(" expected ", err);
+    escrow_print_term(err, diag->expected);
+    fputs(", found ", err);
+    escrow_print_term(err, diag->found);
+  }
+  fputc('\n', err);
 }
 
 int escrow_read_source(Arena *arena, const char *path, const char **text, size_t *size, Diag *diag) {
