@@ -249,3 +249,65 @@ Probe-forced changes found in M0:
 - `tuple ()` is the value of `prod ()`; `inj 0 of 2 (tuple ())` checks
   against `Option A`.
 - `unfold` is not written: no structural measure, no `Nat` fuel (SPEC O9).
+
+## M1 probe results (2026-10-06)
+
+This is a hand build in the main loop. The Fable builder died on a 429
+(req_011CfmiAvXiC4A1F7w64B2zu). The opus fallback died on
+`reasoning_extraction` (req_011CfmiEopkq9GNUGUk3fRi7). Neither agent wrote
+a file.
+
+### P6. `emit` checks each top-level definition
+
+`probe/p6-leaf-contract.asy` is the P1 protocol with two entries. Each entry
+returns the code of `rule F agg t` for one literal tally. `probe/p6-run.sh`
+appends it to the assembled arrow-debreu program.
+
+| Command | Result |
+|---|---|
+| `check` | ok (20.6 s, 120 MB) |
+| `axioms` | `EvmOpcodes` only |
+| `emit`, `run` | refused: "a projection needs a right former" |
+
+`probe/p6-variants.sh`: the leaf `decCode release` uses no prelude
+operation, and it gets the same refusal. Thus the leaf is not the cause.
+
+`probe/p6-prefix.sh`: the file is the members line, prelude sections 1 to
+k, and the P6 contract with the leaf `decCode release`.
+
+| k | `emit` |
+|---|---|
+| 1 to 6 | ok (0.85 to 3.96 s, 85 to 121 MB) |
+| 7, 8 | refused: `M0_PROTOCOL: M1 wordNat` |
+
+Probe-forced: `emit` applies its checks to each top-level definition, not
+only to the definitions that `main` reaches. Prelude section 7 (`Ledger :=
+Address -> Nat` and its operations) fails them. The program scenario
+(projections of an open `Escrow`) fails them too. Thus the contract file
+cannot hold the prelude or the program (SPEC O11).
+
+Probe-forced: a leaf helper over open counts cannot give `reflNat members`,
+because `natAdd` reduces only on literals. Each table entry takes literal
+counts.
+
+### P7. One packed code tabulates the orbit rule: PASS
+
+`probe/p7-table.sh` appends this to the assembled arrow-debreu program:
+`code := decCode (L t0) + 4 * decCode (L t1)`, with `decCode` release 1,
+refund 2, hold 3, `t0 = (2, 1, 0)` and `t1 = (0, 2, 1)`.
+
+| Candidate | `check` |
+|---|---|
+| `EqNat code 0 := reflNat 0` | refused: "gives the index 0 and the type asks for 9" (15.7 s) |
+| `EqNat code 9 := reflNat 9` | ok (7.7 s, 118 MB) |
+
+Method (SPEC O11, RULED 2026-10-06): run 1 checks a wrong candidate, and the
+generator reads the packed value from the error text. Run 2 checks it with
+`reflNat`. Run 2 is the certificate: the kernel accepts the table only when
+the value is the normal form of `code`. The error text is a hint, not a
+trust base. Base-4 digit i is the code of tally i. With `members = n` there
+are (n + 1)(n + 2) / 2 digits. The time for a large n is not measured.
+
+The wall times in this section are 10 to 50 s for files that took less than
+1 s in M0. The machine had other loads. Do not use these times as a
+benchmark.

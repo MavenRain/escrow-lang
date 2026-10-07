@@ -10,7 +10,8 @@ the types and operations of `design/DENOTATIONAL-DESIGN.md` (the design).
 
 A program gives a membership size, a constitution and, when one exists, an
 aggregation for that constitution. The compiler checks the program and writes
-one assay source file. Assay compiles that file to EVM bytecode. Assay is the
+two assay source files (section 8). Assay compiles the contract file to EVM
+bytecode. Assay is the
 host and the target (section 8).
 
 The meaning of a program is the dependent pair of design section 2. The assay
@@ -37,7 +38,7 @@ The compiler refuses these assay forms in a program: `mu`, `nu`, `axiom`,
 `fallback`, `error`, `invariant`, `predicate`, `proof`, `guard`, `sload` and
 `sstore`. It also refuses a definition that uses a prelude name. Thus a
 program cannot add a data type, an unproved fact or general recursion.
-Recursion comes only from `fold` and `unfold`. The compiler writes the
+Recursion comes only from `fold` (O9 RULED). The compiler writes the
 contract; a program cannot.
 
 ## 3. Type formers
@@ -68,7 +69,7 @@ that the design uses:
   generic type functions. Each list is one `mu` family per element type, so
   its `map` is an endomap and its `bind` stays in the family.
 - **Algebra**: `foldBallots` and `foldClaims` (`def rec`, structural). There
-  is no `unfold`: it has no structural measure (open item O9). Built-in
+  is no `unfold`: it has no structural measure (O9 RULED 2026-10-06). Built-in
   `Nat` has no eliminator, so there is no `fold` on `Nat` (probe-forced).
 - **Filterable**: `filterOption`, `filterBallots`, `filterClaims`. A test is
   `A -> Option (prod ())`; leg 1 keeps, as leg 1 of `natEq` and `natLt` is
@@ -201,9 +202,12 @@ behind the ruling are in `probe/CAPABILITY.md`.
 
 - The host is the assay kernel. It checks the dependent types of a program
   and evaluates its closed terms. escrow-lang has no checker of its own.
-- The target is one `.asy` file. Assay has no import form, so the file
-  holds `def members : Nat := N`, the prelude, the program and the
-  contract, in that order (probe-forced: the prelude reads `members`).
+- The target is two `.asy` files (O11 RULED 2026-10-06; probe-forced by
+  P6: `emit` checks each top-level definition). Assay has no import form,
+  so the kernel file holds `def members : Nat := N`, the prelude, the
+  program and the orbit table, in that order (probe-forced: the prelude
+  reads `members`). The contract file holds the core protocol, the
+  storage, the entries and literal words only.
 - Assay has no implicit arguments, so each prelude name takes its type
   arguments explicitly (probe-forced).
 - The prelude (`prelude/Prelude.asy`, eight `-- @section` parts) defines
@@ -216,8 +220,9 @@ behind the ruling are in `probe/CAPABILITY.md`.
   above. M0 results: `probe/CAPABILITY.md`, "M0 prelude and examples".
 - The generator is a Bend 2 program, pinned to the assay commit in `PIN`.
   It reads a program, applies the refusal list of section 2, tabulates the
-  orbit rule with the assay kernel, writes the `.asy` file and runs
-  `assay check`, `assay axioms` and `assay emit`.
+  orbit rule with the assay kernel (the packed code of P7), and writes the
+  kernel file and the contract file. It runs `assay check` and `assay
+  axioms` on both files and `assay emit` on the contract file.
 - USER ruling 2026-10-06: `assay axioms` reports no axiom for the prelude
   and the program. For the contract file it reports only `EvmOpcodes`, the
   marker of the assay core protocol that `emit` requires (`M0_PROTOCOL`;
@@ -256,8 +261,8 @@ behind the ruling are in `probe/CAPABILITY.md`.
   `unfold` and `filter` on `List` become one set per list family.
 - O9. `unfold` has no structural measure. Built-in `Nat` has no
   eliminator, so fuel cannot be a `Nat`, and the prelude invents no fuel.
-  The prelude has no `unfold`. Section 2 says that recursion comes from
-  `fold` and `unfold`; until a ruling, only `fold`. Ruling item.
+  The prelude has no `unfold`. RULED 2026-10-06 (USER): drop `unfold`.
+  Recursion comes only from `fold` (section 2).
 - O10. Probe-forced (M0, 2026-10-06): the assay kernel refuses
   `fun (s : S) => (s.1, s.2)` for `S := (n : Nat) * EqNat n 3`. The type
   of `s.2` holds `s.1` without a return annotation, a written `s.1` holds
@@ -265,9 +270,16 @@ behind the ruling are in `probe/CAPABILITY.md`.
   Assay has no Sigma pattern (`match`, `case` and `let` on a pair do not
   parse). Thus `Config`, `Tally` and `Aggregation F` are `mu` records read
   by `match`, and the Sigma forms that stay (`IsSelfConstituting`,
-  `EscrowDAO`, `Le`) are built and never projected. Ruling item: keep the
-  records, or fix the conversion in assay (the assay tree is read-only for
-  this work).
+  `EscrowDAO`, `Le`) are built and never projected. RULED 2026-10-06
+  (USER): keep the `mu` records. Assay does not change.
+- O11. Probe-forced (M1, P6 in `probe/CAPABILITY.md`): `emit` checks each
+  top-level definition, and it refuses prelude section 7 and the program
+  scenario. Thus the target is two files, not the one file of section 8: a
+  kernel file (members line, prelude, program and orbit table) for `check`
+  and `axioms`, and a contract file (protocol, storage, entries and literal
+  words only) for `check`, `axioms` and `emit`. RULED 2026-10-06 (USER):
+  two files. The table comes from the kernel file by the packed code of
+  P7. The second `reflNat` check certifies it.
 
 ## 10. Milestones
 
@@ -275,5 +287,8 @@ behind the ruling are in `probe/CAPABILITY.md`.
   the four operations; the refusal list; example programs for the
   Arrow-impossibility and Arrow-Debreu regimes, checked by `assay check`.
 - M1: the generator and the contract writer (section 7); differential
-  tests of kernel evaluation against `assay run` traces.
+  tests of kernel evaluation against `assay run` traces. Status
+  2026-10-06: probes P6 and P7 are done (`probe/CAPABILITY.md`, O11). The
+  contract writer, the generator and the differential tests are not
+  started.
 - M2: open items O4 and O7, after a ruling.
