@@ -29,6 +29,11 @@ Assay checkout.
   it lacked `SURFACE-BRANCH-SCAN`. The witness now labels the emission
   assertion consistently. The mutant fails, and its restored control
   passes. This correction is included in the tracked dependency patch.
+- The patch changed `Makefile`, `dev/stage-a-gates.py` and
+  `src/emitter.bend` but not their `dev/DENOMINATORS.sha256` lines, so
+  `shasum -a 256 -c dev/DENOMINATORS.sha256` failed on those three files
+  in the patched tree (the base passes). The patch now updates the three
+  lines and names them in `dev/STAGE-SURFACE-BRANCH-COMMIT.txt`.
 
 ## Validation
 
@@ -42,7 +47,8 @@ Assay checkout.
 | Local `dev/trusted-lines.py .tools/assay` | Passed, emitter 1812/1815, total 3204/3565 |
 | Three-member tally certification | `3 3 2 2 3 3 2 1 1 1`; generated fixture matches |
 | Both contract regimes | Check, emit and axiom audit passed; only `EvmOpcodes` |
-| Stored patch | Applies to pinned base; resulting tree `5990d7ec7903f50f74049dcb3aacafbe40f53bc9` |
+| Stored patch | Applies to pinned base; resulting tree `cc81e87dfdb77dad597dfd6c552038ca951bd200` |
+| `shasum -a 256 -c dev/DENOMINATORS.sha256` on the patched tree | Passed (fresh apply and `.tools/assay`); setup reused the cached build; `zsh probe/regression.sh` passed |
 
 Full command captures are retained locally under `.kanon-exec/`:
 `run-llJFAI` (build), `run-WIY2V4` (generator), `run-IzwvpP`

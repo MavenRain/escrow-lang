@@ -13,12 +13,25 @@ index 9f1e8fe..2a86dea 100644
 +`if le a b then BODY else BODY`, lowered to the core `le` branch.
 @@ -465,0 +468 @@ RETURN-ABI, SOURCE-EVENTS, STORAGE-PROOFS, ERC20-SOURCE,
 +`--surface-branch` adds SURFACE-BRANCH to those 110 legs, for 111 legs.
+diff --git a/dev/DENOMINATORS.sha256 b/dev/DENOMINATORS.sha256
+index fe98bdf..6eeeaf7 100644
+--- a/dev/DENOMINATORS.sha256
++++ b/dev/DENOMINATORS.sha256
+@@ -1 +1 @@
+-f7f62c2b45abe83e1b974eae32f3bbc8e316719211dcc233b579cfd0ddccc35b  Makefile
++bc0f07731e4dc34495376c76e76e8a7fa2c6764a12c499054df91dfcaebe2d45  Makefile
+@@ -136 +136 @@ f6bd1d60ddaf977a7d5ba77479e669ee06182def81925e6e92cb877674a7cf12  dev/segment-di
+-79c6664f04f02e3d860692fadce3466c4ea10d40f5eda74b1efbd73041b845dd  dev/stage-a-gates.py
++a751effc97df28e29ce9ee1556b6d39e799dc6bb14dc16095741b1464401d007  dev/stage-a-gates.py
+@@ -304 +304 @@ d01b4f3f8223d95b199ee7e04674e059b114c1b29c29e6e4bc580322e4d70e76  reference/erc2
+-0936d4e0dfd886f1e7b8c7bfe2a56d42cdbdb0b3d87972489a31414be2724aad  src/emitter.bend
++05b40a791b192fc573e7da131741b649aa84430f9071f44852d629f2281d11f7  src/emitter.bend
 diff --git a/dev/STAGE-SURFACE-BRANCH-COMMIT.txt b/dev/STAGE-SURFACE-BRANCH-COMMIT.txt
 new file mode 100644
-index 0000000..7f4ffe2
+index 0000000..8ce0576
 --- /dev/null
 +++ b/dev/STAGE-SURFACE-BRANCH-COMMIT.txt
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,17 @@
 +Surface: add a tail branch statement to contract source
 +
 +Add `if le a b then BODY else BODY` as the last statement of an entry
@@ -34,7 +47,8 @@ index 0000000..7f4ffe2
 +`--surface-branch` mode and four built mutations with controls. Keep
 +`--m2-reconcile` at 110 legs. Raise the emitter line bound from 1800
 +to 1815 and the ratified total from 3550 to 3565 (USER ruling
-+2026-10-06).
++2026-10-06). Update the `dev/DENOMINATORS.sha256` lines of `Makefile`,
++`dev/stage-a-gates.py` and `src/emitter.bend`.
 diff --git a/dev/SURFACE-BRANCH-MUTATIONS.md b/dev/SURFACE-BRANCH-MUTATIONS.md
 new file mode 100644
 index 0000000..82f55cb
