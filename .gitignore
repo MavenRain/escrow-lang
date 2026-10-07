@@ -5,3 +5,4 @@
 .kanon-replies/
 .kanonx/
 __pycache__/
+build/
