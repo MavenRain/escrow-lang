@@ -336,3 +336,37 @@ P8 (next probe): can a surface entry body hold a core `le a b yes no`
 term? dev/M1-SURFACE.md says "The core syntax remains available for
 programs that recover from an arithmetic error". It does not say that a
 core term can appear in a surface body. SPEC O12 lists the options.
+
+### P8. A core `le` term in a surface body: FAIL
+
+`probe/p8-surface-le.sh` writes six surface contracts with a mapping and
+runs `check` on each (2026-10-06).
+
+| Variant | Body of `pick` | `check` |
+|---|---|---|
+| a | `le a b (pure (word 1)) (pure (word 2))` | `SURFACE_NAME: expected an unreserved identifier` |
+| b | `le a b` with two `sstore ; pure` legs | same as a |
+| c | `le a b (done (word 1)) (done (word 2))` | same as a |
+| d | `if le a b then .. else ..` | `SURFACE_SYNTAX: expected <-` |
+| e | `x <- le a b ; pure x` | `SURFACE_EFFECT: expected sload, caller, callvalue, calldatasize, calldataload, address, add or sub` |
+| z (control) | `guard le a b ; sstore balances a (word 1) ; pure (word 1)` | ok |
+
+Probe-forced: a surface body cannot hold a core term and has no two-way
+branch. For a surface contract, `axioms` reports only `EvmOpcodes`.
+
+## M1 contract writer (2026-10-06)
+
+`gen/contract.sh` writes a surface contract with no branch (SPEC O12 and
+section 7). `gen/table.sh` gives its table by the P7 method over all
+tallies.
+
+| Step | Result |
+|---|---|
+| `gen/table.sh examples/programs/arrow-debreu.asy` | `3 3 2 2 3 3 2 1 1 1` (13.6 s). It agrees with P7 at (2, 1, 0) and (0, 2, 1). |
+| impossibility, members 3: `check`, `axioms`, `emit` | ok, `EvmOpcodes` only, ok (5 files) |
+| debreu, members 3 (72 lines): `check`, `axioms`, `emit` | ok (5.2 s), `EvmOpcodes` only, ok (5 files) |
+| `run` with `amend()` | `0x56faf` = 356271 = the packed table |
+| `run` with `cast(1, 1, 2)` | `0`. `run` starts from empty storage (`"storage":{}`) and does not apply the constructor. |
+
+Probe-forced: a `run` test of `cast` or `settle` must give the table slots
+with `--storage SLOT=WORD`. `assay mapping-slot` gives the slots.
