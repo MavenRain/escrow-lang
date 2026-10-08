@@ -310,7 +310,7 @@ facts are in `probe/CAPABILITY.md`.
   the release and refund legs. Before the ruling, `settle` did not remove
   `c` from the claims and did not require `c` to be in the claims, so one
   claim could settle two times while the payer balance covered it. M3
-  builds the ruling (section 10).
+  built the ruling in chunks 1 to 4 (section 10).
 - O5. At a discrete `D`, `gov F L` agrees with `F` on each configuration.
   The canonical `amend` therefore changes no verdict. The design section 5
   sketch writes `beta` in `amend`, which changes `F` and is not `gov`.
@@ -324,8 +324,8 @@ facts are in `probe/CAPABILITY.md`.
   the caller. A failed send reverts. A recipient that reverts cannot block
   `settle`. Before the ruling, no design operation sent funds out of the
   contract: refund removed `n` from the ledger with no recipient, and
-  release credited `q` with no withdrawal. M3 builds the ruling (section
-  10).
+  release credited `q` with no withdrawal. M3 built the ruling in chunks 1
+  to 4 (section 10).
 - O8. RULED 2026-10-06: the USER accepted the proposal below. Probe P2: a
   constructor of a `mu` family with a parameter cannot
   appear in a term, and a family with a type index lives in `Type 1` and
