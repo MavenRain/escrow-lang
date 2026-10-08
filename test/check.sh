@@ -125,6 +125,14 @@ ESC
 } > "$out/settle-closed.esc"
 refuse "settle of a closed claim is TYPE_MISMATCH" TYPE_MISMATCH bad \
   "the types differ: expected EqNat 1 0, found EqNat 0 0" check "$out/settle-closed.esc"
+# (iv) withdraw takes one erased premise. The credit of address 2 is 5 after
+# the settle, so a withdraw of 6 needs Le 6 5, that is EqNat 6 5.
+{ cat "$programs/arrow-debreu.esc"; cat <<'ESC'
+def bad : Escrow := withdraw 2 6 s2 (0, reflNat 5)
+ESC
+} > "$out/withdraw-over.esc"
+refuse "withdraw of more than the credit is TYPE_MISMATCH" TYPE_MISMATCH bad \
+  "the types differ: expected EqNat 6 5, found EqNat 5 5" check "$out/withdraw-over.esc"
 
 if [ "$failures" -eq 0 ]; then echo "check.sh: all passed"; exit 0; fi
 echo "check.sh: $failures failed"

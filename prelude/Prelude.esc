@@ -424,3 +424,10 @@ def settle : (F : ChoiceRule) -> (L : Aggregation F) -> (x : Config) -> (c : Nat
       (move s c (payer (claimAt (claims s) c)) h)
       s
       (gov F L x)
+
+-- `withdraw a n s h` takes `n` from the credit of `a` (SPEC O7).  The send of
+-- `n` wei and the recipient context of design section 3 are not modeled: the
+-- source has no wei.
+def withdraw : (a : Address) -> (n : Nat) -> (s : Escrow) -> (0 h : Le n (balance (credit s) a)) -> Escrow :=
+  fun (a : Address) (n : Nat) (s : Escrow) (0 h : Le n (balance (credit s) a)) =>
+    tuple (ledger s, tuple (sub (credit s) a n h, tuple (claims s, closed s)))

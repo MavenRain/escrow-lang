@@ -49,4 +49,7 @@ def s2 : Escrow := settle F agg x 0 s1 hc1 ho1 h1
 def payerAfterSettle : EqNat (balance (ledger s2) 1) 0 := reflNat 0
 def payeeAfterSettle : EqNat (balance (credit s2) 2) 5 := reflNat 4
 def openAfterSettle : EqNat (openCount s2) 0 := reflNat 0
+def h3 : Le 5 (balance (credit s2) 2) := (0, reflNat 5)
+def s3 : Escrow := withdraw 2 5 s2 h3
+def creditAfterWithdraw : EqNat (balance (credit s3) 2) 0 := reflNat 0
 def dao : EscrowDAO F := (agg, s2)
