@@ -7,9 +7,13 @@ ballot outermost. The contract side deploys the creation code of `escrowc
 build` in geth evm, then runs `amend`, and `cast` and `settle` on each
 ballot vector. Each `cast` and `settle` result must equal the checker digit,
 and `amend` must return the packed `escrowc table` codes. No verdict comes
-from Python. Storage effects, including O4 claim closing and the O7 credit
-legs, are checked against a Python model, not source `settle` evaluation
-(SPEC section 1).
+from Python. The storage side is source `settle`: for each ballot vector,
+the script writes a temp program, which is PROG, the vector `Config` and
+`settle` of claim 0 from the `claim()` prestate. `escrowc eval` gives both
+ledger balances and credits, the claim count and fields, `closed` at 0
+and the open count. The geth storage after `settle` must equal this
+source state, and the Python model `settled()` must agree with both. PROG
+must declare `F` and `agg`.
 Run `make` first.
 
 usage: python3 test/differential.py [--program PROG]
@@ -29,7 +33,11 @@ ESCROWC = ROOT / 'build/escrowc'
 WORK = ROOT / '.gatework/differential'
 PROGRAM = ROOT / 'examples/programs/arrow-debreu.esc'
 CODES = (1, 2, 3)
+DECISIONS = {1: 'release', 2: 'refund', 3: 'hold'}
 PAYER, PAYEE, AMOUNT = 17, 34, 5
+SOURCE = ('diffLedgerPayer', 'diffLedgerPayee', 'diffCreditPayee', 'diffCreditPayer',
+          'diffClaimCount', 'diffClaimPayer', 'diffClaimPayee', 'diffClaimAmount',
+          'diffClosed', 'diffOpen')
 
 
 def escrowc(*args, lines=1):
@@ -95,6 +103,50 @@ def settled(code):
             S.slot(S.CLOSED, 0): closed}
 
 
+def source(text, size, vector):
+    # PROG, then settle of claim 0 from the claim() prestate at the vector Config.
+    before = claim()
+    payer, payee = before[S.slot(S.LEDGER, PAYER)], before[S.slot(S.LEDGER, PAYEE)]
+    ballots = ''.join(f'(bcons {DECISIONS[code]} ' for code in vector) + 'bnil' + ')' * size
+    return text + f'''
+-- test/differential.py: settle claim 0 from the claim() prestate.
+def diffX : Config := mkConfig {ballots} (reflNat {size})
+def diffStart : Escrow := tuple (add (add empty {PAYER} {payer}) {PAYEE} {payee},
+  tuple (empty, tuple (pureClaims (tuple ({PAYER}, tuple ({PAYEE}, {AMOUNT}))), allOpen)))
+def diffHc : Lt 0 (claimCount (claims diffStart)) := (0, reflNat 1)
+def diffHo : EqNat (closed diffStart 0) 0 := reflNat 0
+def diffH : Le {AMOUNT} (balance (ledger diffStart) {PAYER}) := ({payer - AMOUNT}, reflNat {payer})
+def diffAfter : Escrow := settle F agg diffX 0 diffStart diffHc diffHo diffH
+def diffLedgerPayer : Nat := balance (ledger diffAfter) {PAYER}
+def diffLedgerPayee : Nat := balance (ledger diffAfter) {PAYEE}
+def diffCreditPayee : Nat := balance (credit diffAfter) {PAYEE}
+def diffCreditPayer : Nat := balance (credit diffAfter) {PAYER}
+def diffClaimCount : Nat := claimCount (claims diffAfter)
+def diffClaimPayer : Nat := payer (claimAt (claims diffAfter) 0)
+def diffClaimPayee : Nat := payee (claimAt (claims diffAfter) 0)
+def diffClaimAmount : Nat := amount (claimAt (claims diffAfter) 0)
+def diffClosed : Nat := closed diffAfter 0
+def diffOpen : Nat := openCount diffAfter
+'''
+
+
+def source_settled(text, size, index, vector):
+    # One escrowc eval per definition, because eval gives one NAME per run.
+    path = WORK / f'source-{index}.esc'
+    path.write_text(source(text, size, vector))
+    (ledger_payer, ledger_payee, credit_payee, credit_payer, count,
+     claim_payer, claim_payee, amount, closed, opened) = (
+        int(escrowc('eval', path, name)) for name in SOURCE)
+    # The contract has no open count word: it is the count word minus the closed words.
+    S.require(opened == count - closed,
+              f'{path}: open count {opened}, count {count}, closed {closed}')
+    return {S.COUNT: count, S.slot(S.PAYER, 0): claim_payer,
+            S.slot(S.PAYEE, 0): claim_payee, S.slot(S.AMOUNT, 0): amount,
+            S.slot(S.LEDGER, PAYER): ledger_payer, S.slot(S.LEDGER, PAYEE): ledger_payee,
+            S.slot(S.CREDIT, PAYEE): credit_payee, S.slot(S.CREDIT, PAYER): credit_payer,
+            S.slot(S.CLOSED, 0): closed}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--program', type=Path, default=PROGRAM)
@@ -104,6 +156,7 @@ def main():
     WORK.mkdir(parents=True, exist_ok=True)
     S.WORK = WORK
     size = members(program)
+    text = program.read_text()
     vectors = tuple(itertools.product(CODES, repeat=size))
     codes = table(program, size)
     verdicts = checker_verdicts(program, vectors)
@@ -112,11 +165,14 @@ def main():
     S.expect('differential-amend', runtime, S.data('amend'), {}, {}, packed)
     for index, (vector, code) in enumerate(verdicts.items()):
         S.expect(f'differential-cast-{index}', runtime, S.data('cast', *vector), {}, {}, code)
+        after = source_settled(text, size, index, vector)
         S.expect(f'differential-settle-{index}', runtime, S.data('settle', 0, *vector),
-                 claim(), settled(code), code)
+                 claim(), after, code)
+        S.require(after == settled(code),
+                  f'differential-model-{index}: source {after} != model {settled(code)}')
     print(f'DIFFERENTIAL vectors={len(vectors)} '
           f'codes={"".join(map(str, verdicts.values()))} '
-          f'amend,verdicts geth=escrowc storage=python-model OK '
+          f'amend,verdicts geth=escrowc storage=escrowc-eval OK '
           f'(logs: {WORK})')
 
 
