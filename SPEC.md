@@ -1,7 +1,7 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M2 (TinyCC host, section 10). `escrow-lang` is a
-working name.
+Status: draft, milestone M3 (chunks 1 to 3 done, chunk 4 open; section
+10). `escrow-lang` is a working name.
 
 ## 1. Purpose
 
@@ -252,9 +252,11 @@ range). The Arrow-impossibility writer has no verdict table and no
   verdict table `sum C_i * 4^i` and writes nothing (O5).
 - `withdraw(n)` guards `n <= credit caller`, debits `n` from the credit of
   the caller first, then calls the caller with `n` wei and all the gas. A
-  failed call reverts, so the credit does not change. It returns the
-  remaining credit of the caller (O7). A recipient that reverts cannot
-  block `settle`, because `settle` sends no funds.
+  failed call reverts, so the credit does not change. It reads the credit
+  of the caller again after the call and returns it (O7), so the result
+  includes both withdrawals and settlement credits made during the call. A
+  recipient that reverts cannot block `settle`, because `settle` sends no
+  funds.
 - `cast`, `settle`, `amend` and `withdraw` revert on a call value. At
   Arrow-impossibility the contract has no verdict table, and `cast` and
   `withdraw` revert: deposits stay in the contract (design section 4).
@@ -384,6 +386,10 @@ facts are in `probe/CAPABILITY.md`.
   table` against `amend`. The assay toolchain, generator and probes leave
   the tree. Gates: `make`, `make check-clang`, `make test`, `python3
   test/settlement.py` and `python3 test/differential.py`.
-- M3: O4 and O7 as RULED 2026-10-07 (section 9), in three chunks. (1) O4:
+- M3: O4 and O7 as RULED 2026-10-07 (section 9), in four chunks. (1) O4:
   `settle` checks the claim index and closes the claim. (2) O7: the credit
-  and `withdraw`. (3) Design section 3 and the documents.
+  and `withdraw`, with `test/settlement.py` at 87 cases in geth. (3) Design
+  section 3 and the documents. Chunks 1 to 3 are done (2026-10-07 to
+  2026-10-08). They change only the EVM writer, its tests and the
+  documents. (4) Open: make the prelude and the example programs agree
+  with O4 and O7 (section 1).

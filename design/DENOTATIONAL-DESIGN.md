@@ -34,8 +34,10 @@ Regimes are inherited, not redefined: Arrow-impossibility (empty aggregation), A
 **Escrow.** A claim is a triple \((p, q, n)\) of payer, payee, and amount in a cancellative commutative monoid \(A\) of assets (pointwise \(\mathbb{N}\), or \(\mathbb{N}\) per token). An escrow state is
 
 \[
-E \;=\; (\mathrm{ledger} : \mathrm{Address} \to A)\;\times\; (\mathrm{claims} : \mathrm{List}\,\mathrm{Claim}).
+E \;=\; (\mathrm{ledger} : \mathrm{Address} \to A)\;\times\; (\mathrm{credit} : \mathrm{Address} \to A)\;\times\; (\mathrm{claims} : \mathrm{List}\,\mathrm{Claim}).
 \]
+
+The credit of an address is the amount that the address can withdraw (section 3).
 
 No release predicate lives in \(E\). The predicate is not data.
 
@@ -55,7 +57,7 @@ So the rule that moves funds is the rule the DAO constitutes. That is the whole 
 
 ## 3. Meaning of the operations
 
-Write \(s\) for an escrow state and \(L\) for a chosen aggregation. The four operations that earn a homomorphism:
+Write \(s\) for an escrow state and \(L\) for a chosen aggregation. The five operations that earn a homomorphism:
 
 **Deposit** does not consult governance.
 
@@ -73,18 +75,34 @@ It is the monoid action of \(A\) on the ledger, paired with the identity on \(L\
 
 Two ballots in the same orbit denote the same cast. That is `lan_implies_orbit_constant`, re-exported rather than re-proved.
 
-**Settle** factors through the verdict. For a claim \(c = (p, q, n)\) at configuration \(X\),
+**Settle** factors through the verdict. For an open claim \(c = (p, q, n)\) at configuration \(X\), with the proof \(h : n \le \mathrm{ledger}\, p\),
 
 \[
 \llbracket\mathrm{settle}\, c\rrbracket\,(L, s) \;=\;
 \begin{cases}
-(L,\; s\{\mathrm{ledger}\, p \mathrel{-}= n,\; \mathrm{ledger}\, q \mathrel{+}= n\}) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Release}, \\
-(L,\; s\{\mathrm{ledger}\, p \mathrel{-}= n\}) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Refund}, \\
+(L,\; s\{\mathrm{ledger}\, p \mathrel{-}= n,\; \mathrm{credit}\, q \mathrel{+}= n,\; \mathrm{claims} \mathrel{-}= c\}) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Release}, \\
+(L,\; s\{\mathrm{ledger}\, p \mathrel{-}= n,\; \mathrm{credit}\, p \mathrel{+}= n,\; \mathrm{claims} \mathrel{-}= c\}) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Refund}, \\
 (L, s) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Hold}.
 \end{cases}
 \]
 
+Release and refund close the claim: \(\mathrm{claims} \mathrel{-}= c\) removes \(c\) from the open claims (SPEC O4). The contract keeps the index of \(c\) and sets its closed flag, so the indices of the other claims do not change. Hold changes nothing. The claim stays open, and a later settle can decide it.
+
+Settle sends no funds. Release and refund move \(n\) from the ledger into the credit, which is the monoid action of \(A\) on the credit (SPEC O7). The payee or the payer then gets the funds with withdraw.
+
 Partiality is genuine: in the Arrow-impossibility regime \(\mathrm{Aggregation}\,\mathrm{act}\, F\) is empty, so \(\llbracket\mathrm{settle}\rrbracket\) is the empty function. Funds are stuck, and that is the denotation, not a bug.
+
+**Withdraw** does not consult governance. For the caller \(a\) and an amount \(n \le \mathrm{credit}\, a\), it first debits the credit. For a fixed EVM environment, write \(C_{a,n}\) for the transformation of the escrow state induced by sending \(n\) to \(a\) and running the recipient, including its reentrant calls. On a successful send,
+
+\[
+\llbracket\mathrm{withdraw}\, n\rrbracket_{C}\,(L, s) \;=\; (L,\; C_{a,n}(s\{\mathrm{credit}\, a \mathrel{-}= n\})).
+\]
+
+The debit is a partial inverse of the monoid action of \(A\) on the credit, paired with the identity on \(L\). \(A\) is cancellative, so \(\mathrm{credit}\, a \mathrel{-}= n\) has one value when \(n \le \mathrm{credit}\, a\). For a larger \(n\), withdraw is not defined, and the call reverts. The full withdrawal composes the debit with \(C_{a,n}\), which is the identity only when recipient execution leaves the escrow state unchanged. The credit guard alone does not guarantee that the send succeeds.
+
+The contract debits the credit first, then it sends \(n\) wei to \(a\). If the send fails, the call reverts and the state stays \((L, s)\), including rollback of reentrant changes. The recipient can call withdraw, deposit or settle during the send. Each withdrawal checks and debits the current credit before its send. For a fixed address, cumulative withdrawals are bounded by its initial credit plus credit added by settlements during recipient execution. Withdraw reads the credit of \(a\) again after the send and returns it, so the result includes both debits and new settlement credits. For example, credit 30 followed by withdraw 12 and a reentrant settlement adding 5 returns 23; a further reentrant withdrawal of 23 makes the total sent 35.
+
+In the Arrow-impossibility regime no settle occurs, so each credit stays empty, and withdraw reverts. The escrow is deposit-only, and the funds stay in the contract (section 4).
 
 **Amend** is the one operation-level homomorphism already proved in the DAO design, lifted unchanged across the escrow:
 
@@ -170,11 +188,13 @@ The dictionary that makes this a denotation rather than a sketch:
 
 | Assay form | Denotation | Homomorphism? |
 |---|---|---|
-| `storage Rep` | representation of \(\Sigma L.\, E\), not \(E\) itself | — |
+| `storage Rep` | representation of \(\Sigma L.\, E\), not \(E\) itself | not an operation |
 | `deposit` | monoid action of \(A\), identity on \(L\) | yes |
 | `cast` | unit of \(\mathrm{LeftKanExtension}\) | yes (orbit-constant) |
 | `amend` | \(\mathrm{Gov}\) | yes (`hom_amend`, by `rfl`) |
 | `settle` | case on \((\mathrm{Gov}\, L).\mathrm{obj}\) | yes, where \(L\) exists |
+| `credit` | packing of \(\mathrm{Address} \to A\); settle adds to it, withdraw takes from it | not an operation |
+| `withdraw` | partial credit debit composed with recipient execution \(C_{a,n}\), identity on \(L\) | relative to the recipient context \(C_{a,n}\) in section 3 |
 | `verdict` | \((\mathrm{Gov}\, L).\mathrm{obj}\, X\) | bridge, not an operation |
 | `selfConstituting` | erased witness of \(\mathrm{IsSelfConstituting}\, F\) | proof, erased |
 | `beta` | parameter of \(F\), not a tally | representation only |
@@ -191,4 +211,4 @@ Matching the retractions already in the DAO design:
 - Quorum is a predicate on the orbit groupoid, not yet a homomorphism.
 - No naturality square for \(F \mapsto \mathrm{Aggregation}\,\mathrm{act}\, F\) is claimed; that needs the 2-categorical structure the DAO design already declines.
 
-The assay contract can be emitted, traced, and differentially tested against geth. None of that is the design. The design is the pair \((\mathrm{Aggregation}\,\mathrm{act}\, F,\; E)\) together with the four homomorphisms, and the contract is correct only insofar as its entries denote them.
+The assay contract can be emitted, traced, and differentially tested against geth. None of that is the design. The design is the pair \((\mathrm{Aggregation}\,\mathrm{act}\, F,\; E)\) together with the operations in section 3, and the contract is correct only insofar as its entries denote them, including the recipient context for withdraw.

@@ -45,6 +45,13 @@ The assay probe results P1 to P8 (2026-10-06) are in the git history:
   and one code in 1 to 3 per tally with exactly `(n+1)(n+2)/2` codes
   (`EVM_TABLE`). The bound 14 keeps the packed `amend` table in one word:
   120 codes of 2 bits are 240 bits, and 15 members give 136 codes (272 bits).
+- Runtime size (MEASURED 2026-10-08 at a00089c, M3): the Arrow-Debreu
+  runtime at 14 members is 1693 bytes. The limit `EVM_RUNTIME_MAX` is
+  24576 bytes (EIP-170). The runtime has the 120-code verdict table and
+  the `deposit`, `cast`, `settle`, `amend` and `withdraw` entries. The
+  program is `examples/programs/arrow-debreu.esc` with 14 members and
+  14-ballot configurations. `escrowc build --runtime` used about 6 MiB of
+  memory (6.0 and 6.3 MiB in two runs).
 - Arrow-impossibility has no verdict table, so its writer accepts the
   full member range of program checking without a 14-member cap. The
   writer requires no decision codes (`EVM_TABLE`).
