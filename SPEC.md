@@ -27,7 +27,11 @@ no membership or open-claim premise. For example, `claimsAfterSettle` in
 `examples/programs/arrow-debreu.esc` still proves a count of 1 after
 release. Source settlement state and replay behavior therefore do not yet
 model the O4 runtime in section 7. Aligning the prelude and its examples
-with stable claim indices remains pending M3 work. The differential test
+with stable claim indices remains pending M3 work. M3 chunk 2 implements
+the O7 credit legs and `withdraw` in the EVM writer only, too. Source
+`settle` still adds a released amount to the ledger balance of the payee
+and only debits a refunded amount, and the prelude has no credit and no
+`withdraw`. The differential test
 compares verdicts with the checker and storage with a Python model; it
 does not establish agreement with source settlement state.
 
@@ -219,9 +223,10 @@ range). The Arrow-impossibility writer has no verdict table and no
   writes no storage.
 - Storage slot 0 is the ledger, a mapping from address to word. The claims
   are a count (slot 1) and three mappings from index to payer (slot 2),
-  payee (slot 3) and amount (slot 4). Slot 6 maps an index to its closed
-  flag: 1 is closed and 0 is open (O4). Slot 5 is kept for the credit of
-  O7. A mapping slot is keccak256 of the key word and the base slot word.
+  payee (slot 3) and amount (slot 4). Slot 5 is the credit, a mapping from
+  address to the word that the address can withdraw (O7). Slot 6 maps an
+  index to its closed flag: 1 is closed and 0 is open (O4). A mapping slot
+  is keccak256 of the key word and the base slot word.
 - Each selector is keccak256 of the signature with `uint256` words, which
   `escrowc` computes when it writes the code. Short calldata and an unknown
   selector revert.
@@ -238,14 +243,21 @@ range). The Arrow-impossibility writer has no verdict table and no
   release, refund or hold leg of design section 3. Before the branch, it
   reverts unless `c` is less than the claim count and claim `c` is open
   (O4). Then the proof `h` becomes the guard `n <= ledger p`, including
-  hold. Release moves `n` from `p` to `q` with an overflow guard, refund
-  debits `n` from `p`, and both close claim `c`. Hold writes nothing, so
-  the claim stays open and a later `settle` can decide it. It returns the
-  verdict. A failed guard reverts.
+  hold. Release moves `n` from the ledger of `p` to the credit of `q`, and
+  refund moves `n` from the ledger of `p` to the credit of `p` (O7). Each
+  credit add has an overflow guard. Release and refund close claim `c`.
+  Hold writes nothing, so the claim stays open and a later `settle` can
+  decide it. It returns the verdict. A failed guard reverts.
 - `amend()` takes no argument at the canonical `Phi`. It returns the packed
   verdict table `sum C_i * 4^i` and writes nothing (O5).
-- `cast`, `settle` and `amend` revert on a call value. At Arrow-impossibility
-  the contract has no verdict table and `cast` reverts.
+- `withdraw(n)` guards `n <= credit caller`, debits `n` from the credit of
+  the caller first, then calls the caller with `n` wei and all the gas. A
+  failed call reverts, so the credit does not change. It returns the
+  remaining credit of the caller (O7). A recipient that reverts cannot
+  block `settle`, because `settle` sends no funds.
+- `cast`, `settle`, `amend` and `withdraw` revert on a call value. At
+  Arrow-impossibility the contract has no verdict table, and `cast` and
+  `withdraw` revert: deposits stay in the contract (design section 4).
 - Proof terms erase. Each guard is checked and its witness is dropped.
 
 ## 8. Host and target

@@ -2,9 +2,10 @@
  * bytecode of the contract EscrowDAO (SPEC section 7) directly.
  *
  * Storage: ledger (slot 0, address -> word), claimCount (slot 1), payer,
- * payee and amount (slots 2, 3 and 4, index -> word), and closed (slot 6,
- * index -> word, 1 = closed, SPEC O4). Slot 5 is kept for the credit of
- * SPEC O7. A mapping entry lives at keccak256(key . slot), as in Solidity.
+ * payee and amount (slots 2, 3 and 4, index -> word), credit (slot 5,
+ * address -> word, the withdrawable funds of SPEC O7) and closed (slot 6,
+ * index -> word, 1 = closed, SPEC O4). A mapping entry lives at
+ * keccak256(key . slot), as in Solidity.
  *
  * Arrow-Debreu: the orbit rule is a byte table at the end of the runtime
  * code, read with CODECOPY, so no entry can write it. Ballot codes 1, 2
@@ -13,7 +14,7 @@
  *
  * Every failure is REVERT with empty output: a short calldata, an unknown
  * selector, a call value sent to an entry that is not payable, a failed
- * guard and an overflow of add. */
+ * guard, an overflow of add and a failed CALL of withdraw. */
 #include "evm.h"
 #include "keccak.h"
 #include <stdarg.h>
@@ -30,7 +31,7 @@ enum {
 
 enum {
   SLOT_LEDGER = 0, SLOT_COUNT = 1, SLOT_PAYER = 2, SLOT_PAYEE = 3, SLOT_AMOUNT = 4,
-  SLOT_CLOSED = 6
+  SLOT_CREDIT = 5, SLOT_CLOSED = 6
 };
 
 /* Memory: 0x00 to 0x3f is scratch for keccak256 and the table read. */
@@ -38,19 +39,19 @@ enum { MEM_DECISION = 0x80, MEM_PAYER = 0xa0, MEM_AMOUNT = 0xc0, MEM_BALANCE = 0
 
 typedef enum {
   OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_LT = 0x10, OP_GT = 0x11,
-  OP_EQ = 0x14, OP_ISZERO = 0x15, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLVALUE = 0x34,
-  OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36, OP_CODECOPY = 0x39,
-  OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52, OP_SLOAD = 0x54,
-  OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_JUMPDEST = 0x5b,
-  OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61, OP_PUSH4 = 0x63,
-  OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91,
-  OP_RETURN = 0xf3, OP_REVERT = 0xfd
+  OP_EQ = 0x14, OP_ISZERO = 0x15, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLER = 0x33,
+  OP_CALLVALUE = 0x34, OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36,
+  OP_CODECOPY = 0x39, OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52,
+  OP_SLOAD = 0x54, OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_GAS = 0x5a,
+  OP_JUMPDEST = 0x5b, OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61,
+  OP_PUSH4 = 0x63, OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91,
+  OP_CALL = 0xf1, OP_RETURN = 0xf3, OP_REVERT = 0xfd
 } Op;
 
 typedef enum {
   LABEL_REVERT, LABEL_DEPOSIT, LABEL_CAST, LABEL_SETTLE, LABEL_AMEND,
-  LABEL_RELEASE, LABEL_REFUND, LABEL_DONE, LABEL_TABLE, LABEL_RUNTIME,
-  LABEL_COUNT
+  LABEL_WITHDRAW, LABEL_RELEASE, LABEL_REFUND, LABEL_DONE, LABEL_TABLE,
+  LABEL_RUNTIME, LABEL_COUNT
 } Label;
 
 typedef enum { ENTRY_PAYABLE, ENTRY_NONPAYABLE } Payment;
@@ -358,19 +359,29 @@ static void debit_payer(Asm *a) {
   op(a, OP_SSTORE);
 }
 
-/* The payee balance is read after the debit, so a claim with payer =
- * payee leaves the balance unchanged. */
-static void credit_payee(Asm *a) {
-  argument(a, 0);
-  slot(a, SLOT_PAYEE);
-  op(a, OP_SLOAD);
-  slot(a, SLOT_LEDGER);
+/* address -> (nothing): credit address += amount, with an overflow guard
+ * (SPEC O7). The credit is a separate mapping from the ledger, so a claim
+ * with payer = payee still moves the amount from ledger to credit. */
+static void add_credit(Asm *a) {
+  slot(a, SLOT_CREDIT);
   op(a, OP_DUP1);
   op(a, OP_SLOAD);
   load(a, MEM_AMOUNT);
   checked_add(a);
   op(a, OP_SWAP1);
   op(a, OP_SSTORE);
+}
+
+static void credit_payee(Asm *a) {
+  argument(a, 0);
+  slot(a, SLOT_PAYEE);
+  op(a, OP_SLOAD);
+  add_credit(a);
+}
+
+static void credit_payer(Asm *a) {
+  load(a, MEM_PAYER);
+  add_credit(a);
 }
 
 /* Reverts unless c < claimCount and claim c is open (SPEC O4). */
@@ -397,8 +408,10 @@ static void close_claim(Asm *a) {
 
 /* settle c x: guard c < claimCount and claim c open, guard amount c <=
  * balance (payer c) (the proof h), then the release, refund or hold leg
- * of design section 3 by the decision. Release and refund close claim c,
- * hold leaves it open. */
+ * of design section 3 by the decision. Release moves the amount from the
+ * ledger of the payer to the credit of the payee, refund to the credit of
+ * the payer (SPEC O7). Release and refund close claim c, hold leaves it
+ * open. */
 static void settle(Asm *a, unsigned members) {
   entry(a, LABEL_SETTLE, members + 1, ENTRY_NONPAYABLE);
   tally(a, 1, members);
@@ -436,9 +449,43 @@ static void settle(Asm *a, unsigned members) {
   jump(a, LABEL_DONE);
   jumpdest(a, LABEL_REFUND);
   debit_payer(a);
+  credit_payer(a);
   close_claim(a);
   jumpdest(a, LABEL_DONE);
   load(a, MEM_DECISION);
+  return_top(a);
+}
+
+/* withdraw n: guard n <= credit caller, debit the credit first, then CALL
+ * the caller with n wei and all gas. A failed CALL reverts, so the debit is
+ * undone. Returns the remaining credit of the caller (SPEC O7). */
+static void withdraw(Asm *a) {
+  entry(a, LABEL_WITHDRAW, 1, ENTRY_NONPAYABLE);
+  op(a, OP_CALLER);
+  slot(a, SLOT_CREDIT);
+  op(a, OP_DUP1);
+  op(a, OP_SLOAD);
+  op(a, OP_DUP1);
+  argument(a, 0);
+  op(a, OP_GT);
+  revert_if(a);
+  argument(a, 0);
+  op(a, OP_SWAP1);
+  op(a, OP_SUB);
+  op(a, OP_DUP2);
+  op(a, OP_SSTORE);
+  op(a, OP_PUSH0);
+  op(a, OP_PUSH0);
+  op(a, OP_PUSH0);
+  op(a, OP_PUSH0);
+  argument(a, 0);
+  op(a, OP_CALLER);
+  op(a, OP_GAS);
+  op(a, OP_CALL);
+  op(a, OP_ISZERO);
+  revert_if(a);
+  /* The callback can change the credit. Keep its slot and reload it. */
+  op(a, OP_SLOAD);
   return_top(a);
 }
 
@@ -474,11 +521,13 @@ static void runtime_debreu(Asm *a, const EscrowContract *contract) {
   dispatch(a, "cast", n, LABEL_CAST);
   dispatch(a, "settle", n + 1, LABEL_SETTLE);
   dispatch(a, "amend", 0, LABEL_AMEND);
+  dispatch(a, "withdraw", 1, LABEL_WITHDRAW);
   revert_block(a);
   deposit(a);
   cast(a, n);
   settle(a, n);
   amend(a, packed);
+  withdraw(a);
   bind(a, LABEL_TABLE);
   for (size_t k = 0; k < (size_t)n * (n + 1) + 1; k++)
     put(a, table[k]);

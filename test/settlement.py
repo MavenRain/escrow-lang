@@ -22,8 +22,9 @@ GENESIS = dict(config=CONFIG, coinbase='0x' + '00' * 20, difficulty='0x0', gasLi
                nonce='0x0000000000000000', timestamp='0x0', number='0x0',
                excessBlobGas='0x0', blobGasUsed='0x0')
 CODES = (3, 3, 2, 2, 3, 3, 2, 1, 1, 1)
-LEDGER, COUNT, PAYER, PAYEE, AMOUNT = range(5)
-CLOSED = 6
+LEDGER, COUNT, PAYER, PAYEE, AMOUNT, CREDIT, CLOSED = range(7)
+FUNDS = 10**24
+REVERTING = '60006000fd'
 
 
 def require(ok, message):
@@ -79,11 +80,16 @@ def words(slots):
     return {int(key, 16): int(value, 16) for key, value in slots.items() if int(value, 16)}
 
 
-def run(name, code, calldata, *, before=None, value=0, create=False):
+def wei(text):
+    return int(text, 16) if str(text).startswith('0x') else int(text)
+
+
+def run(name, code, calldata, *, before=None, value=0, create=False, balance=0, sender=None):
+    # balance: the prestate wei of the contract; sender: runtime hex code for SENDER.
     state = dict(GENESIS, alloc={
-        SENDER: dict(balance=hex(10**24)),
-        RECEIVER: dict(balance='0x0', storage={f'0x{k:064x}': f'0x{v:064x}'
-                                               for k, v in (before or {}).items() if v})})
+        SENDER: dict(balance=hex(FUNDS), **({} if sender is None else {'code': '0x' + sender})),
+        RECEIVER: dict(balance=hex(balance), storage={f'0x{k:064x}': f'0x{v:064x}'
+                                                      for k, v in (before or {}).items() if v})})
     genesis = WORK / (name + '-prestate.json')
     genesis.write_text(json.dumps(state))
     argv = ['evm', '--verbosity', '0', 'run', '--prestate', str(genesis), '--gas', str(GAS),
@@ -95,21 +101,27 @@ def run(name, code, calldata, *, before=None, value=0, create=False):
     require(len(records) >= 2 and 'accounts' in records[-1], f'{name}: missing state dump')
     errors = [row['error'] for row in records if row.get('error')]
     require(all(error == 'execution reverted' for error in errors), f'{name}: EVM fault {errors}')
-    stores = {key.lower().removeprefix('0x'): words(account.get('storage', {}))
-              for key, account in records[-1]['accounts'].items()}
-    return dict(status='revert' if errors else 'success',
+    accounts = {key.lower().removeprefix('0x'): account
+                for key, account in records[-1]['accounts'].items()}
+    stores = {key: words(account.get('storage', {})) for key, account in accounts.items()}
+    # The status is the outermost frame: a reverted inner CALL also logs an error row.
+    return dict(status='revert' if records[-2].get('error') else 'success',
                 output=records[-2]['output'].lower().removeprefix('0x'),
                 storage=stores.get(RECEIVER, {}),
+                balances={key: wei(account.get('balance', 0)) for key, account in accounts.items()},
                 created={key: value for key, value in stores.items() if value and key != RECEIVER})
 
 
-def expect(name, code, calldata, before, after, result, *, value=0):
-    actual = run(name, code, calldata, before=before, value=value)
+def expect(name, code, calldata, before, after, result, *, value=0, balance=0, sender=None,
+           balances=None):
+    actual = run(name, code, calldata, before=before, value=value, balance=balance, sender=sender)
     wanted = dict(status='revert' if result is None else 'success',
                   output='' if result is None else f'{result:064x}',
                   storage={k: v for k, v in after.items() if v})
     got = {key: actual[key] for key in wanted}
     require(got == wanted, f'{name}: EVM {got} != {wanted}')
+    paid = {key: actual['balances'].get(key, 0) for key in (balances or {})}
+    require(paid == (balances or {}), f'{name}: balances {paid} != {balances}')
 
 
 def tally_index(members, release, refund):
@@ -156,24 +168,28 @@ def debreu_cases(runtime):
         for same in (False, True):
             payer, payee = 17, 17 if same else 34
             for balance in (4, 20):
+                # SPEC O7: release credits the payee, refund credits the payer.
                 before = {COUNT: 1, slot(PAYER, 0): payer, slot(PAYEE, 0): payee,
-                          slot(AMOUNT, 0): 5, slot(LEDGER, payee): 10, slot(LEDGER, payer): balance}
+                          slot(AMOUNT, 0): 5, slot(LEDGER, payee): 10, slot(LEDGER, payer): balance,
+                          slot(CREDIT, payer): 1, slot(CREDIT, payee): 7}
                 after = dict(before)
                 result = None
                 if balance >= 5:
                     result = decision
                     after[slot(LEDGER, payer)] -= 5 if decision in (1, 2) else 0
-                    after[slot(LEDGER, payee)] += 5 if decision == 1 else 0
+                    after[slot(CREDIT, payee)] += 5 if decision == 1 else 0
+                    after[slot(CREDIT, payer)] += 5 if decision == 2 else 0
                     after[slot(CLOSED, 0)] = 1 if decision in (1, 2) else 0
                 expect(f'settle-{decision}-{same}-{balance}', runtime,
                        data('settle', 0, *ballots), before, after, result)
                 cases += 1
     before = {COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34, slot(AMOUNT, 0): 5,
-              slot(LEDGER, 17): 20, slot(LEDGER, 34): 2**256 - 1}
-    expect('release-overflow', runtime, data('settle', 0, 1, 1, 3), before, before, None)
+              slot(LEDGER, 17): 20, slot(CREDIT, 17): 2**256 - 1, slot(CREDIT, 34): 2**256 - 1}
+    for name, ballots in (('release', (1, 1, 3)), ('refund', (2, 2, 3))):
+        expect(f'credit-overflow-{name}', runtime, data('settle', 0, *ballots), before, before, None)
     for ballot in (0, 4):
         expect(f'bad-ballot-{ballot}', runtime, data('settle', 0, ballot, 1, 3), before, before, None)
-    return cases + 3
+    return cases + 4
 
 
 def closing_cases(runtime):
@@ -186,8 +202,8 @@ def closing_cases(runtime):
             ('bound-empty', 0, {slot(LEDGER, 17): 20})]
     for label, index, before in rows:
         expect(f'settle-{label}', runtime, data('settle', index, *release), before, before, None)
-    released = {**claim, slot(LEDGER, 17): 15, slot(LEDGER, 34): 15, slot(CLOSED, 0): 1}
-    refunded = {**claim, slot(LEDGER, 17): 15, slot(CLOSED, 0): 1}
+    released = {**claim, slot(LEDGER, 17): 15, slot(CREDIT, 34): 5, slot(CLOSED, 0): 1}
+    refunded = {**claim, slot(LEDGER, 17): 15, slot(CREDIT, 17): 5, slot(CLOSED, 0): 1}
     expect('hold-open', runtime, data('settle', 0, *hold), claim, claim, 3)
     expect('hold-then-release', runtime, data('settle', 0, *release), claim, released, 1)
     expect('close-refund', runtime, data('settle', 0, *refund), claim, refunded, 2)
@@ -198,11 +214,70 @@ def closing_cases(runtime):
                    closed, closed, None)
             again += 1
     two = {**claim, COUNT: 2, slot(PAYER, 1): 34, slot(PAYEE, 1): 17, slot(AMOUNT, 1): 3}
-    first = {**two, slot(LEDGER, 34): 7, slot(LEDGER, 17): 23, slot(CLOSED, 1): 1}
-    both = {**first, slot(LEDGER, 17): 18, slot(LEDGER, 34): 12, slot(CLOSED, 0): 1}
+    first = {**two, slot(LEDGER, 34): 7, slot(CREDIT, 17): 3, slot(CLOSED, 1): 1}
+    both = {**first, slot(LEDGER, 17): 15, slot(CREDIT, 34): 5, slot(CLOSED, 0): 1}
     expect('close-index-1', runtime, data('settle', 1, *release), two, first, 1)
     expect('open-index-0', runtime, data('settle', 0, *release), first, both, 1)
     return len(rows) + 3 + again + 2
+
+
+def reentrant_sender(calldata, *, fail_after=False):
+    # Call the escrow once from the recipient fallback. The storage flag
+    # stops recursion when the nested withdrawal calls this recipient again.
+    code = bytearray.fromhex('5f546100005760015f55')
+    for offset in range(0, len(calldata) // 2, 32):
+        word = calldata[2 * offset:2 * (offset + 32)].ljust(64, '0')
+        code.extend(bytes.fromhex('7f' + word + f'60{offset:02x}52'))
+    # CALL(gas, escrow, 0, 0, calldata size, 0, 0); retain success in slot 1.
+    code.extend(bytes.fromhex(f'5f5f60{len(calldata) // 2:02x}5f5f73' + RECEIVER + '5af1600155'))
+    if fail_after:
+        code.extend(bytes.fromhex(REVERTING))
+    code[3:5] = len(code).to_bytes(2, 'big')
+    code.extend(bytes.fromhex('5b00'))  # JUMPDEST; STOP
+    return code.hex()
+
+
+def withdraw_reentry_cases(runtime):
+    mine = slot(CREDIT, int(SENDER, 16))
+    before = {mine: 30}
+    for label, nested, result, paid in (('within', 7, 11, 19), ('full', 18, 0, 30),
+                                       ('above', 19, 18, 12)):
+        actual = run(f'withdraw-reentry-{label}', runtime, data('withdraw', 12),
+                     before=before, balance=100, sender=reentrant_sender(data('withdraw', nested)))
+        require(actual['status'] == 'success', f'reentry-{label}: outer withdrawal failed')
+        require(actual['storage'] == ({mine: result} if result else {}),
+                f'reentry-{label}: wrong credit {actual["storage"]}')
+        require(actual['balances'][RECEIVER] == 100 - paid and
+                actual['balances'][SENDER] == FUNDS + paid, f'reentry-{label}: wrong transfer')
+        require(actual['created'].get(SENDER) == {0: 1, **({1: 1} if nested <= 18 else {})},
+                f'reentry-{label}: callback did not exercise the nested call')
+        require(int(actual['output'], 16) == result,
+                f'reentry-{label}: returned {int(actual["output"], 16)}, remaining credit {result}')
+    expect('withdraw-reentry-revert', runtime, data('withdraw', 12), before, before, None,
+           balance=100, sender=reentrant_sender(data('withdraw', 7), fail_after=True),
+           balances={RECEIVER: 100, SENDER: FUNDS})
+    return 4
+
+
+def withdraw_cases(runtime):
+    # SPEC O7: withdraw n guards n <= credit caller, debits the credit, then
+    # sends n wei to the caller. A failed send reverts with the credit kept.
+    mine = slot(CREDIT, int(SENDER, 16))
+    before = {mine: 30}
+    unchanged = {RECEIVER: 100, SENDER: FUNDS}
+    for label, amount in (('within', 12), ('full', 30)):
+        expect(f'withdraw-{label}', runtime, data('withdraw', amount), before, {mine: 30 - amount},
+               30 - amount, balance=100,
+               balances={RECEIVER: 100 - amount, SENDER: FUNDS + amount})
+    rows = [('above', data('withdraw', 31), 0, None, 100),
+            ('value', data('withdraw', 12), 1, None, 100),
+            ('short', data('withdraw', 12)[:-2], 0, None, 100),
+            ('sender-reverts', data('withdraw', 12), 0, REVERTING, 100),
+            ('no-funds', data('withdraw', 12), 0, None, 5)]
+    for label, calldata, value, sender, balance in rows:
+        expect(f'withdraw-{label}', runtime, calldata, before, before, None, value=value,
+               balance=balance, sender=sender, balances={RECEIVER: balance, SENDER: FUNDS})
+    return 2 + len(rows) + withdraw_reentry_cases(runtime)
 
 
 def entry_cases(runtime, regime):
@@ -232,7 +307,8 @@ def main():
     cases = refusals()
     runtime = bytecode('runtime', 3, 'debreu', *CODES)
     deploy('debreu-deploy', bytecode('creation', 3, 'debreu', *CODES), runtime)
-    cases += debreu_cases(runtime) + closing_cases(runtime) + entry_cases(runtime, 'debreu')
+    cases += (debreu_cases(runtime) + closing_cases(runtime) + withdraw_cases(runtime) +
+              entry_cases(runtime, 'debreu'))
     packed = sum(code * 4**index for index, code in enumerate(CODES))
     expect('amend', runtime, data('amend'), {}, {}, packed)
     expect('amend-value', runtime, data('amend'), {}, {}, None, value=1)
@@ -243,7 +319,11 @@ def main():
     deploy('impossibility-deploy', bytecode('creation', 3, 'impossibility'), impossible)
     cases += entry_cases(impossible, 'impossibility')
     expect('impossibility-cast', impossible, data('cast', 1, 1, 3), {}, {}, None)
-    cases += 1
+    # Arrow-impossibility is deposit-only: no withdraw entry (design section 4).
+    credit = {slot(CREDIT, int(SENDER, 16)): 30}
+    expect('impossibility-withdraw', impossible, data('withdraw', 12), credit, credit, None,
+           balance=100, balances={RECEIVER: 100, SENDER: FUNDS})
+    cases += 2
     for members, codes, vectors in (
             (1, (3, 2, 1), [(1,), (2,), (3,)]),
             (14, tuple(i % 3 + 1 for i in range(120)),
