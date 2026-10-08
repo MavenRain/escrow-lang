@@ -283,18 +283,29 @@ facts are in `probe/CAPABILITY.md`.
 - O3. RULED 2026-10-06: `D` stays discrete and the Schelling-Ising row is
   not reachable. The DAO repository finds its fork in the indiscrete target
   `MagPhase`, not a discrete one.
-- O4. `settle` does not remove `c` from the claims and does not require `c`
-  to be in the claims. One claim can settle two times while the payer
-  balance covers it.
+- O4. RULED 2026-10-07 (USER): `settle` closes the claim on release and
+  refund. `settle c` reverts unless `c < claimCount` and claim `c` is
+  open. Release and refund close the claim. Hold leaves the claim open, so
+  a later `settle` can decide it. Design section 3 gets `claims -= c` on
+  the release and refund legs. Before the ruling, `settle` did not remove
+  `c` from the claims and did not require `c` to be in the claims, so one
+  claim could settle two times while the payer balance covered it. M3
+  builds the ruling (section 10).
 - O5. At a discrete `D`, `gov F L` agrees with `F` on each configuration.
   The canonical `amend` therefore changes no verdict. The design section 5
   sketch writes `beta` in `amend`, which changes `F` and is not `gov`.
 - O6. The design section 5 sketch reverts `settle` unless the verdict is
   release. Design section 3 debits on refund and does nothing on hold. The
   compiler follows section 3.
-- O7. No design operation sends funds out of the contract. Refund removes
-  `n` from the ledger with no recipient, and release credits `q` with no
-  withdrawal.
+- O7. RULED 2026-10-07 (USER): pull payments. Release moves `n` from the
+  ledger of `p` to a withdrawable credit of `q`. Refund moves `n` from the
+  ledger of `p` to a credit of `p`. A new nonpayable entry `withdraw(n)`
+  first debits `n` from the credit of the caller, then sends `n` wei to
+  the caller. A failed send reverts. A recipient that reverts cannot block
+  `settle`. Before the ruling, no design operation sent funds out of the
+  contract: refund removed `n` from the ledger with no recipient, and
+  release credited `q` with no withdrawal. M3 builds the ruling (section
+  10).
 - O8. RULED 2026-10-06: the USER accepted the proposal below. Probe P2: a
   constructor of a `mu` family with a parameter cannot
   appear in a term, and a family with a type index lives in `Type 1` and
@@ -348,4 +359,6 @@ facts are in `probe/CAPABILITY.md`.
   table` against `amend`. The assay toolchain, generator and probes leave
   the tree. Gates: `make`, `make check-clang`, `make test`, `python3
   test/settlement.py` and `python3 test/differential.py`.
-- M3: open items O4 and O7, after a ruling.
+- M3: O4 and O7 as RULED 2026-10-07 (section 9), in three chunks. (1) O4:
+  `settle` checks the claim index and closes the claim. (2) O7: the credit
+  and `withdraw`. (3) Design section 3 and the documents.
