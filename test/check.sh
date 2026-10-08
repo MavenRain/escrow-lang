@@ -92,6 +92,18 @@ done
 
 refuse "mutant debreu payeeAfterSettle reflNat 4" TYPE_MISMATCH payeeAfterSettle \
   "the types differ: expected EqNat 5 5, found EqNat 4 4" check "$root/test/mutants/debreu-payee-4.esc"
+# The rule `first` reads member position 0, so no aggregation of it type
+# checks. (a) arrow-debreu.esc with only the constitution changed to first.
+refuse "mutant debreu constitution first" TYPE_MISMATCH agg \
+  "with | 0 (escrowq2x0 : prod ()) => hold | 1 (escrowq2x0 : prod ()) => release))" \
+  check "$root/test/mutants/debreu-first.esc"
+# (b) mkAgg first at the constant orbit rule release.
+refuse "mutant mkAgg first at the constant rule" TYPE_MISMATCH agg \
+  "found EqDec release release" check "$root/test/mutants/impossibility-agg-release.esc"
+# (c) mkAgg first with the proof reflDec (first x).
+refuse "mutant mkAgg first with proof reflDec (first x)" TYPE_MISMATCH agg \
+  ", found EqDec (foldBallots Decision (fun (escrowq1x0 : Decision) (escrowq2x0 : Decision) => escrowq1x0) hold (match escrowq0x0 as escrowq1x0 in Config return Ballots with | mkConfig escrowq1x0 escrowq2x0 => escrowq1x0)) (foldBallots Decision (fun (escrowq1x0 : Decision) (escrowq2x0 : Decision) => escrowq1x0) hold (match escrowq0x0 as escrowq1x0 in Config return Ballots with | mkConfig escrowq1x0 escrowq2x0 => escrowq1x0))" \
+  check "$root/test/mutants/impossibility-agg-refl.esc"
 refuse "verdicts of a name that is not a ChoiceRule" VERDICT_TYPE agg "agg is not a ChoiceRule" \
   verdicts "$programs/arrow-debreu.esc" agg
 refuse "eval of an unknown name" TYPE_SCOPE nothing "nothing is not declared" \

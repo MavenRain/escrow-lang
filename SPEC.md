@@ -358,6 +358,29 @@ facts are in `probe/CAPABILITY.md`.
   is now members 1 to 14 (section 7, `probe/CAPABILITY.md`). All commands
   refuse zero members during program checking (`REFUSE_MEMBERS`). The assay
   text of O11 and O12 is in `git show 8351635:SPEC.md`.
+- O13. RULED 2026-10-08 (USER): ballots on chain. An Arrow-Debreu program
+  declares `def memberAddresses : Addresses := ...` in its source. An
+  Arrow-impossibility program may omit this declaration; when
+  present, it is checked the same way and writes no contract data. The
+  checker refuses a declaration unless there is one address per member,
+  each address is below 2^160 and no address repeats. A new nonpayable entry
+  `vote(c, b)`
+  records the ballot `b` of the caller on claim `c`. It reverts unless the
+  caller is a member, `c < claimCount`, claim `c` is open (O4) and `b` is
+  1, 2 or 3. A member can change its ballot while the claim is open. Slot 7
+  maps a claim index
+  to a packed word with 2 bits per member (member `m` at `4^m`), and 0 is no
+  ballot. `settle(c)` takes no ballots. It keeps the checks on claim index,
+  open status and payer balance of section 7 and also reverts unless all
+  `n` ballots of claim `c` are present. Any caller can settle.
+  `cast(b1, ..., bn)` stays the pure
+  tally of design section 3. The Arrow-impossibility contract gets no
+  `vote`. The prelude has no model of the votes: on chain, the `Config` of
+  source `settle` is the stored ballots. Before the ruling, and until M4
+  builds it, `cast` and `settle` read the ballots from calldata (section
+  7) and the contract has no member addresses. Thus any caller of `settle`
+  picks the verdict, for example a payee that sends `n` release ballots.
+  M4 builds the ruling (section 10).
 
 
 ## 10. Milestones
@@ -390,3 +413,9 @@ facts are in `probe/CAPABILITY.md`.
   `test/differential.py` compares the geth storage after `settle` with
   `escrowc eval` of source `settle`. Chunk 4 changes no EVM code. `make
   test` gives 97 ok.
+- M4: O13 as RULED 2026-10-08 (section 9), ballots on chain. M4 is ruled
+  and not built. Section 7 shows the M3 contract until M4 builds the
+  ruling. The three refusal mutants `test/mutants/debreu-first.esc`,
+  `impossibility-agg-release.esc` and `impossibility-agg-refl.esc` (a
+  constitution or `mkAgg` built on the rule `first`) come with the ruling,
+  so `make test` gives 100 ok.
