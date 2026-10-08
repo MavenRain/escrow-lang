@@ -15,10 +15,8 @@ def firstX : EqDec (first x) release := reflDec release
 def firstY : EqDec (first y) refund := reflDec refund
 
 -- Scenario (refl candidates): one deposit of 5 from address 1 to address 2.
-def countClaims : Claims -> Nat := fun (cs : Claims) =>
-  foldClaims Nat (fun (c : Claim) (n : Nat) => natAdd n 1) 0 cs
-def start : Escrow := tuple (empty, cnil)
+def start : Escrow := tuple (empty, tuple (empty, tuple (cnil, allOpen)))
 def s1 : Escrow := deposit 1 2 5 start
-def payerAfterDeposit : EqNat (balance s1.0 1) 5 := reflNat 5
-def payeeAfterDeposit : EqNat (balance s1.0 2) 0 := reflNat 0
-def claimsAfterDeposit : EqNat (countClaims s1.1) 1 := reflNat 1
+def payerAfterDeposit : EqNat (balance (ledger s1) 1) 5 := reflNat 5
+def payeeAfterDeposit : EqNat (balance (ledger s1) 2) 0 := reflNat 0
+def claimsAfterDeposit : EqNat (claimCount (claims s1)) 1 := reflNat 1

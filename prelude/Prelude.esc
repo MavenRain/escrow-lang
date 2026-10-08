@@ -271,9 +271,11 @@ def reconstitute : (F : ChoiceRule) -> (L : Aggregation F) -> Aggregation (gov F
     mkAgg (gov F L) (rule F L) (fun (x : Config) => reflDec (rule F L (orbit x)))
 
 -- @section 7 Ledger
--- `Address := Nat`, so `credit` and `debit` compare addresses with `natEq`
--- (probe-forced).  `debit` takes an erased proof that `n` is below the
--- balance: subtraction in a cancellative monoid.
+-- `Address := Nat`, so `add` and `sub` compare addresses with `natEq`
+-- (probe-forced).  `sub` takes an erased proof that `n` is below the
+-- balance: subtraction in a cancellative monoid.  The escrow has two
+-- ledgers: the deposits and the credit that an address can withdraw
+-- (SPEC O7).
 def Address : Type 0 := Nat
 
 def Ledger : Type 0 := Address -> Nat
@@ -282,7 +284,7 @@ def empty : Ledger := fun (a : Address) => 0
 
 def balance : Ledger -> Address -> Nat := fun (l : Ledger) (p : Address) => l p
 
-def credit : Ledger -> Address -> Nat -> Ledger :=
+def add : Ledger -> Address -> Nat -> Ledger :=
   fun (l : Ledger) (p : Address) (n : Nat) (a : Address) =>
     case natEq a p with
     | 0 (u : prod ()) => l a
@@ -291,14 +293,35 @@ def credit : Ledger -> Address -> Nat -> Ledger :=
 def Le : Nat -> Nat -> Type 0 := fun (n : Nat) (m : Nat) =>
   (k : Nat) * EqNat (natAdd n k) m
 
-def debit : (l : Ledger) -> (p : Address) -> (n : Nat) -> (0 h : Le n (balance l p)) -> Ledger :=
+def Lt : Nat -> Nat -> Type 0 := fun (n : Nat) (m : Nat) => Le (natAdd n 1) m
+
+def sub : (l : Ledger) -> (p : Address) -> (n : Nat) -> (0 h : Le n (balance l p)) -> Ledger :=
   fun (l : Ledger) (p : Address) (n : Nat) (0 h : Le n (balance l p)) (a : Address) =>
     case natEq a p with
     | 0 (u : prod ()) => l a
     | 1 (u : prod ()) => natSub (l a) n
 
+-- The closed map gives 1 at the index of a claim that release or refund
+-- closed (SPEC O4).  The claim list is append-only, so the index of a
+-- claim does not change.
+def Closed : Type 0 := Nat -> Nat
+
+def allOpen : Closed := fun (c : Nat) => 0
+
+def close : Closed -> Nat -> Closed :=
+  fun (k : Closed) (c : Nat) (i : Nat) =>
+    case natEq i c with
+    | 0 (u : prod ()) => k i
+    | 1 (u : prod ()) => 1
+
 -- @section 8 Claims, Escrow and the operations
 def Claim : Type 0 := prod (Address, prod (Address, Nat))
+
+def payer : Claim -> Address := fun (c : Claim) => c.0
+
+def payee : Claim -> Address := fun (c : Claim) => c.1.0
+
+def amount : Claim -> Nat := fun (c : Claim) => c.1.1
 
 mu Claims : Type 0 :=
   | cnil : Claims
@@ -333,23 +356,71 @@ def filterClaims : (Claim -> Option (prod ())) -> Claims -> Claims :=
         | 1 (u : prod ()) => ccons h t)
       cnil xs
 
-def Escrow : Type 0 := prod (Ledger, Claims)
+def claimCount : Claims -> Nat := fun (cs : Claims) =>
+  foldClaims Nat (fun (c : Claim) (n : Nat) => natAdd n 1) 0 cs
+
+-- `claimAt cs c` is the claim at index `c`.  The fold gives each claim the
+-- index of its position.  Past the end the result is `(0, (0, 0))`, so the
+-- lookup is total.  `settle` excludes that case with `Lt c (claimCount cs)`.
+def claimAt : Claims -> Nat -> Claim :=
+  fun (cs : Claims) (c : Nat) =>
+    foldClaims (Nat -> Claim)
+      (fun (h : Claim) (t : Nat -> Claim) (i : Nat) =>
+        case natEq i c with
+        | 0 (u : prod ()) => t (natAdd i 1)
+        | 1 (u : prod ()) => h)
+      (fun (i : Nat) => tuple (0, tuple (0, 0)))
+      cs 0
+
+-- Design E: the ledger, the credit, the claims, then the closed map.
+def Escrow : Type 0 := prod (Ledger, prod (Ledger, prod (Claims, Closed)))
+
+def ledger : Escrow -> Ledger := fun (s : Escrow) => s.0
+
+def credit : Escrow -> Ledger := fun (s : Escrow) => s.1.0
+
+def claims : Escrow -> Claims := fun (s : Escrow) => s.1.1.0
+
+def closed : Escrow -> Closed := fun (s : Escrow) => s.1.1.1
+
+-- `openCount s` counts the claims that `settle` can still decide.
+def openCount : Escrow -> Nat := fun (s : Escrow) =>
+  foldClaims (Nat -> Nat)
+    (fun (h : Claim) (t : Nat -> Nat) (i : Nat) =>
+      case natEq (closed s i) 0 with
+      | 0 (u : prod ()) => t (natAdd i 1)
+      | 1 (u : prod ()) => natAdd (t (natAdd i 1)) 1)
+    (fun (i : Nat) => 0)
+    (claims s) 0
 
 def EscrowDAO : ChoiceRule -> Type 0 := fun (F : ChoiceRule) =>
   (L : Aggregation F) * Escrow
 
 def deposit : Address -> Address -> Nat -> Escrow -> Escrow :=
   fun (p : Address) (q : Address) (n : Nat) (s : Escrow) =>
-    tuple (credit s.0 p n, appendClaims s.1 (pureClaims (tuple (p, tuple (q, n)))))
+    tuple (add (ledger s) p n,
+      tuple (credit s,
+        tuple (appendClaims (claims s) (pureClaims (tuple (p, tuple (q, n)))), closed s)))
 
 def castOrbit : (F : ChoiceRule) -> (L : Aggregation F) -> (x : Config) -> (y : Config) -> EqTally (orbit x) (orbit y) -> EqDec (gov F L x) (gov F L y) :=
   fun (F : ChoiceRule) (L : Aggregation F) (x : Config) (y : Config) (e : EqTally (orbit x) (orbit y)) =>
     congTD (rule F L) (orbit x) (orbit y) e
 
-def settle : (F : ChoiceRule) -> (L : Aggregation F) -> (x : Config) -> (c : Claim) -> (s : Escrow) -> (0 h : Le c.1.1 (balance s.0 c.0)) -> Escrow :=
-  fun (F : ChoiceRule) (L : Aggregation F) (x : Config) (c : Claim) (s : Escrow) (0 h : Le c.1.1 (balance s.0 c.0)) =>
+-- `move s c q h` is the release or refund leg of claim `c`.  The amount
+-- leaves the ledger of the payer, goes to the credit of `q`, and the claim
+-- closes (SPEC O4, O7).
+def move : (s : Escrow) -> (c : Nat) -> (q : Address) -> (0 h : Le (amount (claimAt (claims s) c)) (balance (ledger s) (payer (claimAt (claims s) c)))) -> Escrow :=
+  fun (s : Escrow) (c : Nat) (q : Address) (0 h : Le (amount (claimAt (claims s) c)) (balance (ledger s) (payer (claimAt (claims s) c)))) =>
+    tuple (sub (ledger s) (payer (claimAt (claims s) c)) (amount (claimAt (claims s) c)) h,
+      tuple (add (credit s) q (amount (claimAt (claims s) c)),
+        tuple (claims s, close (closed s) c)))
+
+-- `settle` decides the open claim at index `c` (SPEC O4).  Release pays the
+-- payee, refund pays the payer, and hold keeps the state and the claim open.
+def settle : (F : ChoiceRule) -> (L : Aggregation F) -> (x : Config) -> (c : Nat) -> (s : Escrow) -> (0 hc : Lt c (claimCount (claims s))) -> (0 ho : EqNat (closed s c) 0) -> (0 h : Le (amount (claimAt (claims s) c)) (balance (ledger s) (payer (claimAt (claims s) c)))) -> Escrow :=
+  fun (F : ChoiceRule) (L : Aggregation F) (x : Config) (c : Nat) (s : Escrow) (0 hc : Lt c (claimCount (claims s))) (0 ho : EqNat (closed s c) 0) (0 h : Le (amount (claimAt (claims s) c)) (balance (ledger s) (payer (claimAt (claims s) c)))) =>
     decide Escrow
-      (tuple (credit (debit s.0 c.0 c.1.1 h) c.1.0 c.1.1, s.1))
-      (tuple (debit s.0 c.0 c.1.1 h, s.1))
+      (move s c (payee (claimAt (claims s) c)) h)
+      (move s c (payer (claimAt (claims s) c)) h)
       s
       (gov F L x)

@@ -106,6 +106,26 @@ awk 'BEGIN {
 }' > "$out/deep.esc"
 refuse "deep evaluation is TYPE_FUEL" TYPE_FUEL l11 "evaluation nests too deep" check "$out/deep.esc"
 
+# settle takes three erased premises. Each case below gives one false
+# premise and correct proofs of the others. (i) range: index 1 of one
+# claim, so Lt 1 1 needs EqNat 2 1.
+{ cat "$programs/arrow-debreu.esc"; cat <<'ESC'
+def bad : Escrow := settle F agg x 1 s1 (0, reflNat 1) (reflNat 0) (0, reflNat 0)
+ESC
+} > "$out/settle-range.esc"
+refuse "settle of an index past the claims is TYPE_MISMATCH" TYPE_MISMATCH bad \
+  "the types differ: expected EqNat 2 1, found EqNat 1 1" check "$out/settle-range.esc"
+# (ii) closed: a second deposit keeps the ledger above the amount, so only
+# the open premise of the second settle of claim 0 is false.
+{ cat "$programs/arrow-debreu.esc"; cat <<'ESC'
+def t1 : Escrow := deposit 1 2 5 s1
+def t2 : Escrow := settle F agg x 0 t1 (1, reflNat 2) (reflNat 0) (5, reflNat 10)
+def bad : Escrow := settle F agg x 0 t2 (1, reflNat 2) (reflNat 0) (0, reflNat 5)
+ESC
+} > "$out/settle-closed.esc"
+refuse "settle of a closed claim is TYPE_MISMATCH" TYPE_MISMATCH bad \
+  "the types differ: expected EqNat 1 0, found EqNat 0 0" check "$out/settle-closed.esc"
+
 if [ "$failures" -eq 0 ]; then echo "check.sh: all passed"; exit 0; fi
 echo "check.sh: $failures failed"
 exit 1

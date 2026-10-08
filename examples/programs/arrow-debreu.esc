@@ -38,16 +38,15 @@ def aggGov : Aggregation (gov F agg) := reconstitute F agg
 def selfF : IsSelfConstituting F := selfConstitutes F agg
 
 -- Scenario (refl candidates): one deposit of 5 from address 1 to address
--- 2, then settle at the release verdict of `x`.
-def countClaims : Claims -> Nat := fun (cs : Claims) =>
-  foldClaims Nat (fun (c : Claim) (n : Nat) => natAdd n 1) 0 cs
-def start : Escrow := tuple (empty, cnil)
+-- 2, then settle claim 0 at the release verdict of `x`.  The release
+-- moves the amount to the credit of the payee and closes the claim.
+def start : Escrow := tuple (empty, tuple (empty, tuple (cnil, allOpen)))
 def s1 : Escrow := deposit 1 2 5 start
-def c1 : Claim := tuple (1, tuple (2, 5))
-def h1 : Le 5 (balance s1.0 1) := (0, reflNat 5)
-def s2 : Escrow := settle F agg x c1 s1 h1
-def payerAfterSettle : EqNat (balance s2.0 1) 0 := reflNat 0
-def payeeAfterSettle : EqNat (balance s2.0 2) 5 := reflNat 5
--- Source settle still keeps the claim; the EVM closes it (SPEC section 1).
-def claimsAfterSettle : EqNat (countClaims s2.1) 1 := reflNat 1
+def hc1 : Lt 0 (claimCount (claims s1)) := (0, reflNat 1)
+def ho1 : EqNat (closed s1 0) 0 := reflNat 0
+def h1 : Le 5 (balance (ledger s1) 1) := (0, reflNat 5)
+def s2 : Escrow := settle F agg x 0 s1 hc1 ho1 h1
+def payerAfterSettle : EqNat (balance (ledger s2) 1) 0 := reflNat 0
+def payeeAfterSettle : EqNat (balance (credit s2) 2) 5 := reflNat 5
+def openAfterSettle : EqNat (openCount s2) 0 := reflNat 0
 def dao : EscrowDAO F := (agg, s2)

@@ -21,19 +21,17 @@ prelude operations by the checker is the executable meaning.
 `test/differential.py` runs each ballot vector through `escrowc verdicts`
 and through the contract in geth, and compares the results.
 
-M3 chunk 1 implements O4 claim closing in the EVM writer only. The source
-prelude still takes a `Claim` value, retains it after settlement, and has
-no membership or open-claim premise. For example, `claimsAfterSettle` in
-`examples/programs/arrow-debreu.esc` still proves a count of 1 after
-release. Source settlement state and replay behavior therefore do not yet
-model the O4 runtime in section 7. Aligning the prelude and its examples
-with stable claim indices remains pending M3 work. M3 chunk 2 implements
-the O7 credit legs and `withdraw` in the EVM writer only, too. Source
-`settle` still adds a released amount to the ledger balance of the payee
-and only debits a refunded amount, and the prelude has no credit and no
-`withdraw`. The differential test
-compares verdicts with the checker and storage with a Python model; it
-does not establish agreement with source settlement state.
+M3 chunk 4a models O4 claim closing and the O7 settlement credit legs in
+the source prelude. `Escrow` contains a deposit ledger, a credit ledger,
+append-only claims and a closed map. `settle` takes a stable claim index
+and erased proofs that it is in range, open and covered by the payer's
+ledger balance. Release subtracts the amount from that balance and adds
+it to the payee's credit; refund adds it to the payer's credit instead.
+Both close the claim, while hold preserves the state. `openAfterSettle`
+in `examples/programs/arrow-debreu.esc` proves that no claim remains open
+after release. Source `withdraw` remains pending M3 work. The differential
+test compares verdicts with the checker and storage with a Python model;
+it does not establish agreement with source settlement state.
 
 ## 2. Programs
 
@@ -121,7 +119,7 @@ Each core type is in `Type 0`. The meaning column cites the design.
 | Type | Meaning | Definition |
 |---|---|---|
 | `Nat` | the asset monoid `A` (pointwise N, section 2) and counts | built-in: literals, `natAdd`, `natSub`, `natEq`, `natLt` |
-| `Address` | a payer or a payee | `Nat` (probe-forced: `credit` compares addresses with `natEq`) |
+| `Address` | a payer or a payee | `Nat` (probe-forced: `add` and `sub` compare addresses with `natEq`) |
 | `Decision` | the discrete category `D` (section 2) | `mu`: `release`, `refund`, `hold`; `decide B r f h d` |
 | `Ballot` | the vote of one member | `Decision` |
 | `Ballots` | a list of ballots | `mu`: `bnil`, `bcons` |
@@ -134,12 +132,14 @@ Each core type is in `Type 0`. The meaning column cites the design.
 | `AmendmentRule` | `Phi` (section 3) | `(Tally -> Decision) -> ChoiceRule` |
 | `Claim` | the triple `(p, q, n)` | `prod (Address, prod (Address, Nat))` |
 | `Claims` | the claim list | `mu`: `cnil`, `ccons` |
-| `Ledger` | `Address -> A` with finite support | `Address -> Nat`: `empty`, `balance`, `credit`, `debit` |
-| `Escrow` | the escrow state `E` | `prod (Ledger, Claims)` |
+| `Ledger` | `Address -> A` with finite support | `Address -> Nat`: `empty`, `balance`, `add`, `sub` |
+| `Closed` | the closed flag at each stable claim index | `Nat -> Nat`: `allOpen`, `close` |
+| `Escrow` | the escrow state `E` | `prod (Ledger, prod (Ledger, prod (Claims, Closed)))`; accessors `ledger`, `credit`, `claims`, `closed` |
 | `EscrowDAO F` | the governed escrow `Sigma L. E` | `(L : Aggregation F) * Escrow` |
 
 `Le n m` is the order of the monoid: `(k : Nat) * EqNat (natAdd n k) m`.
-`debit l p n h` takes an erased proof `0 h : Le n (balance l p)`.
+`Lt n m` is `Le (natAdd n 1) m`.
+`sub l p n h` takes an erased proof `0 h : Le n (balance l p)`.
 Subtraction in a cancellative monoid is defined only below the balance.
 
 The prelude defines `tallyOf` (by `foldBallots`), `total` and `orbit :
@@ -176,14 +176,15 @@ is not proved here (open item O1).
 
 Each operation has its design meaning and its homomorphism. `gov F L x` is
 `rule F L (orbit x)`. `verdict F L x` is `gov F L x`. The types below use
-the prelude names (section 4).
+the prelude names (section 4). In the settlement row, `(p, q, n)` is the
+claim at index `c`, obtained by `claimAt (claims s) c`.
 
 | Operation | Type | Meaning (design section 3) |
 |---|---|---|
-| `deposit p q n s` | `Address -> Address -> Nat -> Escrow -> Escrow` | `credit` on the ledger, append `(p, q, n)` to the claims, identity on `L` |
+| `deposit p q n s` | `Address -> Address -> Nat -> Escrow -> Escrow` | `add` on the ledger, append `(p, q, n)` to the claims, preserve credit and closed flags, identity on `L` |
 | `cast F L x` | `EqDec (F x) (gov F L x)` | the unit at `x`; the state does not change |
 | `castOrbit F L x y e` | `EqTally (orbit x) (orbit y) -> EqDec (gov F L x) (gov F L y)` | two ballots in one orbit give one cast, by `congTD` |
-| `settle F L x c s h` | `Escrow`, with `h : Le n (balance (ledger s) p)` | `decide` on `verdict F L x`: release debits `p` and credits `q`; refund debits `p`; hold gives `s` |
+| `settle F L x c s hc ho h` | `Escrow`, with `c : Nat`, erased `hc : Lt c (claimCount (claims s))`, `ho : EqNat (closed s c) 0`, `h : Le n (balance (ledger s) p)` | `decide` on `verdict F L x`: release subtracts `n` from the ledger of `p`, adds it to the credit of `q` and closes `c`; refund adds it to the credit of `p` instead; hold gives `s` |
 | `amend Phi F L` | `ChoiceRule` | `Phi (rule F L)` |
 | `canonical` | `AmendmentRule` | `fun H x => H (orbit x)` |
 | `homAmend F L x` | `EqDec (amend canonical F L x) (gov F L x)` | `reflDec` |
@@ -391,5 +392,6 @@ facts are in `probe/CAPABILITY.md`.
   and `withdraw`, with `test/settlement.py` at 87 cases in geth. (3) Design
   section 3 and the documents. Chunks 1 to 3 are done (2026-10-07 to
   2026-10-08). They change only the EVM writer, its tests and the
-  documents. (4) Open: make the prelude and the example programs agree
-  with O4 and O7 (section 1).
+  documents. (4) Source settlement and the example programs now model
+  O4 and the O7 credit legs. Source withdrawal and a differential check
+  of source settlement state remain open (section 1).
