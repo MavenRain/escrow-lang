@@ -78,7 +78,7 @@ typedef enum {
   TOK_DEF, TOK_REC, TOK_MU, TOK_FUN, TOK_CASE, TOK_MATCH, TOK_WITH, TOK_AS, TOK_IN,
   TOK_RETURN, TOK_INJ, TOK_OF, TOK_TUPLE, TOK_PROD, TOK_SUM, TOK_TYPE,
   TOK_LPAREN, TOK_RPAREN, TOK_COMMA, TOK_COLON, TOK_DEFINE, TOK_ARROW, TOK_FATARROW,
-  TOK_BAR, TOK_STAR, TOK_DOT
+  TOK_BAR, TOK_STAR, TOK_DOT, TOK_HEX
 } TokenKind;
 
 typedef struct {
@@ -89,8 +89,8 @@ typedef struct {
 } Token;
 
 /* Splits TEXT (SIZE bytes) into tokens that end with one TOK_EOF. Returns
- * ESCROW_EXIT_OK, or ESCROW_EXIT_REFUSED with LEX_TOKEN, LEX_NUMBER or
- * MEMORY. */
+ * ESCROW_EXIT_OK, or ESCROW_EXIT_REFUSED with LEX_TOKEN, LEX_NUMBER,
+ * LEX_HEX or MEMORY. */
 int escrow_lex(Arena *arena, const char *file, const char *text, size_t size, Token **tokens,
                size_t *count, Diag *diag);
 
@@ -141,7 +141,8 @@ typedef enum {
   AST_INJ,     /* inj k of 2 v */
   AST_CASE,    /* case s with | 0 (x : A) => t | 1 (y : B) => u */
   AST_MATCH,   /* match s as w in F i j return T with | c x 0 y => t ... */
-  AST_PROJ     /* t.0, t.1 */
+  AST_PROJ,    /* t.0, t.1 */
+  AST_ADDR     /* 0x2a: an EvmAddress literal, 1 to 64 hex digits */
 } AstKind;
 
 struct Ast {
@@ -151,6 +152,7 @@ struct Ast {
   union {
     const char *name;                                       /* AST_VAR */
     unsigned long long nat;                                 /* AST_NAT */
+    const unsigned char *addr;                              /* AST_ADDR: 32 bytes, big-endian */
     unsigned level;                                         /* AST_TYPE */
     struct { Binder binder; Ast *body; } bind;              /* AST_PI, AST_SIGMA, AST_LAM */
     struct { Ast *fun; Ast *arg; } app;                     /* AST_APP */

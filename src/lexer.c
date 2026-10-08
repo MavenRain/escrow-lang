@@ -39,6 +39,7 @@ static const Spelling PUNCTUATION[] = {
 static int is_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 static int is_word(char c) { return is_letter(c) || is_digit(c) || c == '_'; }
+static int is_hex(char c) { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 
 /* The byte OFFSET bytes ahead, or NUL past the end. */
 static char ahead(const Lexer *lx, size_t offset) {
@@ -113,6 +114,14 @@ static int fail_byte(Lexer *lx, unsigned char byte) {
   return lex_fail(lx, "LEX_TOKEN", "unexpected byte 0x%02x", (unsigned)byte);
 }
 
+/* The number of hex digits after the 0x at the current position. */
+static size_t hex_run(const Lexer *lx) {
+  size_t n = 0;
+  while (is_hex(ahead(lx, 2 + n)))
+    n++;
+  return n;
+}
+
 static int number_value(Lexer *lx, Token *token) {
   unsigned long long value = 0;
   int clip = token->text.length < LEX_CLIP ? (int)token->text.length : LEX_CLIP;
@@ -146,6 +155,10 @@ static int lex_token(Lexer *lx) {
     length = run_of(lx, is_digit);
     kind = TOK_NUMBER;
   }
+  if (c == '0' && ahead(lx, 1) == 'x') {
+    length = 2 + hex_run(lx);
+    kind = TOK_HEX;
+  }
   if (length == 0)
     length = punctuation(lx, &kind);
   if (length == 0)
@@ -160,6 +173,9 @@ static int lex_token(Lexer *lx) {
                     length < LEX_CLIP ? (int)length : LEX_CLIP, token->text.start);
   if (kind == TOK_NUMBER && !number_value(lx, token))
     return 0;
+  if (kind == TOK_HEX && (length == 2 || length > 66 || is_word(ahead(lx, length))))
+    return lex_fail(lx, "LEX_HEX", "the literal %.*s must have 1 to 64 hex digits after 0x",
+                    length < LEX_CLIP ? (int)length : LEX_CLIP, token->text.start);
   remember_def(lx, token);
   lx->count++;
   step(lx, length);

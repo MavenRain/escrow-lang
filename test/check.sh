@@ -54,6 +54,12 @@ expect "verdicts arrow-impossibility first" 0 "111111111222222222333333333" verd
 expect "eval payeeAfterSettle" 0 "reflNat 5" eval "$programs/arrow-debreu.esc" payeeAfterSettle
 expect "eval firstX" 0 "reflDec release" eval "$programs/arrow-impossibility.esc" firstX
 expect "eval members" 0 "3" eval "$programs/arrow-impossibility.esc" members
+# memberAddresses (M4): Arrow-Debreu declares it, and an Arrow-impossibility
+# program with the def (a test fixture) still checks.
+expect "eval memberAddresses" 0 "acons 0x1000000000000000000000000000000000000001 (acons 0x2000000000000000000000000000000000000002 (acons 0x3000000000000000000000000000000000000003 anil))" \
+  eval "$programs/arrow-debreu.esc" memberAddresses
+expect "check impossibility with memberAddresses" 0 "ok impossibility" \
+  check "$root/test/fixtures/impossibility-addresses.esc"
 
 # Erased Sigma fields may be constructed from erased variables and used
 # in types, while the second field remains available at run time.

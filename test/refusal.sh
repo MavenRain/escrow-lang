@@ -57,6 +57,18 @@ refuse match-family TYPE_MATCH x "$members" 'def x : Nat := match release as d i
 refuse match-arms TYPE_MATCH x "$members" 'def x : Nat := match release as d in Decision return Nat with | release => 0 | refund => 1'
 refuse nat-overflow TYPE_NAT x "$members" 'def x : Nat := natAdd 18446744073709551615 1'
 
+# memberAddresses (M4): the length must be members, each address below
+# 2^160, no address twice; a 0x literal has 1 to 64 hex digits.
+a1=0x1000000000000000000000000000000000000001
+a2=0x2000000000000000000000000000000000000002
+refuse address-count REFUSE_ADDRESS_COUNT memberAddresses "$members" \
+  "def memberAddresses : Addresses := acons $a1 (acons $a2 anil)"
+refuse address-range REFUSE_ADDRESS_RANGE memberAddresses "$members" \
+  "def memberAddresses : Addresses := acons $a1 (acons $a2 (acons 0x10000000000000000000000000000000000000000 anil))"
+refuse address-repeat REFUSE_ADDRESS_REPEAT memberAddresses "$members" \
+  "def memberAddresses : Addresses := acons $a1 (acons $a2 (acons $a1 anil))"
+refuse lex-hex-65 LEX_HEX a "$members" 'def a : Nat := 0x10000000000000000000000000000000000000000000000000000000000000000'
+
 if [ "$failures" -eq 0 ]; then echo "refusal.sh: all passed"; exit 0; fi
 echo "refusal.sh: $failures failed"
 exit 1

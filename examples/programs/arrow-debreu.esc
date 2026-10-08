@@ -53,3 +53,10 @@ def h3 : Le 5 (balance (credit s2) 2) := (0, reflNat 5)
 def s3 : Escrow := withdraw 2 5 s2 h3
 def creditAfterWithdraw : EqNat (balance (credit s3) 2) 0 := reflNat 0
 def dao : EscrowDAO F := (agg, s2)
+
+-- The member addresses (M4): one distinct address below 2^160 for each
+-- member, in member order.
+def memberAddresses : Addresses :=
+  acons 0x1000000000000000000000000000000000000001
+    (acons 0x2000000000000000000000000000000000000002
+      (acons 0x3000000000000000000000000000000000000003 anil))

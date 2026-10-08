@@ -126,6 +126,29 @@ static const char *name_of(Parser *p, const Token *token) {
   return name;
 }
 
+static unsigned hex_digit(char c) {
+  if (c >= 'a')
+    return (unsigned)(c - 'a') + 10;
+  if (c >= 'A')
+    return (unsigned)(c - 'A') + 10;
+  return (unsigned)(c - '0');
+}
+
+/* The 32 big-endian bytes of the 0x literal TOKEN (the lexer allows 1 to 64 hex digits). */
+static const unsigned char *hex_bytes(Parser *p, const Token *token) {
+  unsigned char *bytes = arena_alloc(p->arena, 32);
+  if (bytes == NULL)
+    return no_memory(p, token->loc);
+  memset(bytes, 0, 32);
+  size_t digits = token->text.length - 2;
+  for (size_t i = 0; i < digits; i++) {
+    size_t nibble = digits - 1 - i; /* 0 is the least significant hex digit */
+    unsigned value = hex_digit(token->text.start[2 + i]);
+    bytes[31 - nibble / 2] |= (unsigned char)(nibble % 2 == 1 ? value << 4 : value);
+  }
+  return bytes;
+}
+
 static const char *expect_name(Parser *p, const char *what) {
   const Token *token = expect(p, TOK_NAME, what);
   return token == NULL ? NULL : name_of(p, token);
@@ -210,7 +233,8 @@ static int parse_binder(Parser *p, Binder *binder) {
 
 /* An atom starts here: NAME (not a refused form), NUMBER or '('. */
 static int atom_start(const Parser *p) {
-  return (at(p, TOK_NAME) && refused_form(peek_at(p, 0)) == NULL) || at(p, TOK_NUMBER) || at(p, TOK_LPAREN);
+  return (at(p, TOK_NAME) && refused_form(peek_at(p, 0)) == NULL) || at(p, TOK_NUMBER) ||
+         at(p, TOK_HEX) || at(p, TOK_LPAREN);
 }
 
 /* '(' term ')' or the pair '(' term ',' term ')'. */
@@ -232,16 +256,21 @@ static Ast *parse_atom(Parser *p) {
   const Token *token = peek(p);
   if (token->kind == TOK_LPAREN)
     return parse_parens(p);
-  if (token->kind != TOK_NAME && token->kind != TOK_NUMBER)
+  if (token->kind != TOK_NAME && token->kind != TOK_NUMBER && token->kind != TOK_HEX)
     return fail_found(p, "a term");
   advance(p);
-  Ast *ast = make(p, token->kind == TOK_NAME ? AST_VAR : AST_NAT, token->loc, 0);
+  AstKind literal = token->kind == TOK_HEX ? AST_ADDR : AST_NAT;
+  Ast *ast = make(p, token->kind == TOK_NAME ? AST_VAR : literal, token->loc, 0);
   if (ast == NULL)
     return NULL;
   if (token->kind == TOK_NUMBER)
     ast->u.nat = token->value;
   if (token->kind == TOK_NAME)
     ast->u.name = name_of(p, token);
+  if (token->kind == TOK_HEX)
+    ast->u.addr = hex_bytes(p, token);
+  if (token->kind == TOK_HEX && ast->u.addr == NULL)
+    return NULL;
   return token->kind == TOK_NAME && ast->u.name == NULL ? NULL : ast;
 }
 

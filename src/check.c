@@ -26,7 +26,7 @@ typedef struct Global Global;
 typedef struct Names Names;
 
 typedef enum {
-  V_TYPE, V_NAT_TYPE, V_NAT, V_PI, V_SIGMA, V_LAM, V_PAIR, V_TUPLE, V_UNIT,
+  V_TYPE, V_NAT_TYPE, V_NAT, V_ADDR_TYPE, V_ADDR, V_PI, V_SIGMA, V_LAM, V_PAIR, V_TUPLE, V_UNIT,
   V_PROD0, V_PROD, V_SUM, V_INJ, V_DATA, V_CON, V_NEU
 } ValueKind;
 
@@ -54,6 +54,7 @@ struct Frame {
 struct Value {
   ValueKind kind;
   unsigned long long nat;  /* V_TYPE level, V_NAT, V_INJ tag */
+  const unsigned char *addr; /* V_ADDR: 32 bytes, big-endian */
   const char *name;        /* V_PI, V_SIGMA binder; V_NEU variable */
   int erased;              /* V_PI, V_SIGMA */
   Value *left;             /* V_PI, V_SIGMA domain; V_PAIR, V_TUPLE, V_PROD, V_SUM; V_INJ value */
@@ -206,6 +207,12 @@ static Value *mk_nat(C *c, unsigned long long n) {
   return v;
 }
 
+static Value *mk_addr(C *c, const unsigned char *bytes) {
+  Value *v = mk(c, V_ADDR);
+  v->addr = bytes;
+  return v;
+}
+
 static Value *mk_type(C *c, unsigned long long level) {
   Value *v = mk(c, V_TYPE);
   v->nat = level;
@@ -330,6 +337,7 @@ static Value *eval_body(C *c, Bind *env, const Ast *t) {
   switch (t->kind) {
   case AST_VAR: return eval_var(c, env, t);
   case AST_NAT: return mk_nat(c, t->u.nat);
+  case AST_ADDR: return mk_addr(c, t->u.addr);
   case AST_TYPE: return mk_type(c, t->u.level);
   case AST_PI: return closure(c, V_PI, env, t);
   case AST_SIGMA: return closure(c, V_SIGMA, env, t);
@@ -444,7 +452,8 @@ static Value *apply_body(C *c, Value *f, Value *a) {
     fr->arg = a;
     return reduce(c, push(c, f, fr));
   }
-  case V_TYPE: case V_NAT_TYPE: case V_NAT: case V_PI: case V_SIGMA: case V_PAIR: case V_TUPLE:
+  case V_TYPE: case V_NAT_TYPE: case V_NAT: case V_ADDR_TYPE: case V_ADDR: case V_PI: case V_SIGMA:
+  case V_PAIR: case V_TUPLE:
   case V_UNIT: case V_PROD0: case V_PROD: case V_SUM: case V_INJ: break;
   }
   return fail(c, "TYPE_INTERNAL", c->loc, "an application of a value that is not a function");
@@ -549,7 +558,9 @@ static int conv_body(C *c, Value *a, Value *b, int lvl) {
   switch (a->kind) {
   case V_TYPE:
   case V_NAT: return a->nat == b->nat;
+  case V_ADDR: return memcmp(a->addr, b->addr, 32) == 0;
   case V_NAT_TYPE:
+  case V_ADDR_TYPE:
   case V_UNIT:
   case V_PROD0: return 1;
   case V_PI:
@@ -731,6 +742,12 @@ static Ast *quote_body(C *c, Value *v, int lvl) {
     return t;
   }
   case V_NAT_TYPE: return var_node(c, "Nat");
+  case V_ADDR_TYPE: return var_node(c, "EvmAddress");
+  case V_ADDR: {
+    Ast *t = node(c, AST_ADDR);
+    t->u.addr = v->addr;
+    return t;
+  }
   case V_NAT: {
     Ast *t = node(c, AST_NAT);
     t->u.nat = v->nat;
@@ -906,6 +923,7 @@ static Value *infer_body(C *c, Bind *ctx, int lvl, const Ast *t, int relevant) {
   switch (t->kind) {
   case AST_VAR: return infer_var(c, ctx, t, relevant);
   case AST_NAT: return mk(c, V_NAT_TYPE);
+  case AST_ADDR: return mk(c, V_ADDR_TYPE);
   case AST_TYPE:
     return t->u.level == 0 ? mk_type(c, 1) : fail(c, "TYPE_UNIVERSE", t->loc, "Type 1 has no type");
   case AST_PI:
@@ -1016,7 +1034,8 @@ static void check_body(C *c, Bind *ctx, int lvl, const Ast *t, Value *want, int 
     check_case_arm(c, ctx, lvl, &t->u.cases.arms[1], s->right, want, relevant);
     return;
   }
-  case AST_VAR: case AST_NAT: case AST_TYPE: case AST_PI: case AST_SIGMA: case AST_APP: case AST_TUPLE0:
+  case AST_VAR: case AST_NAT: case AST_ADDR: case AST_TYPE: case AST_PI: case AST_SIGMA: case AST_APP:
+  case AST_TUPLE0:
   case AST_PROD0: case AST_PROD: case AST_SUM: case AST_MATCH: case AST_PROJ: break;
   }
   Value *got = infer(c, ctx, lvl, t, relevant);
@@ -1093,7 +1112,7 @@ static void walk(C *c, const Global *g, const Ast *t, Names *scope) {
     if (same(t->u.name, g->name) && lookup(scope, g->name) == NULL)
       fail(c, "TYPE_REC", t->loc, "%s recurs without its arguments", g->name);
     return;
-  case AST_NAT: case AST_TYPE: case AST_TUPLE0: case AST_PROD0: return;
+  case AST_NAT: case AST_ADDR: case AST_TYPE: case AST_TUPLE0: case AST_PROD0: return;
   case AST_PI:
   case AST_SIGMA:
   case AST_LAM:
@@ -1175,7 +1194,7 @@ static int occurs_match(const char *name, const Ast *t) {
 static int occurs(const char *name, const Ast *t) {
   switch (t->kind) {
   case AST_VAR: return same(t->u.name, name);
-  case AST_NAT: case AST_TYPE: case AST_TUPLE0: case AST_PROD0: return 0;
+  case AST_NAT: case AST_ADDR: case AST_TYPE: case AST_TUPLE0: case AST_PROD0: return 0;
   case AST_PI:
   case AST_SIGMA:
   case AST_LAM: return occurs(name, t->u.bind.binder.type) || occurs(name, t->u.bind.body);
@@ -1313,6 +1332,8 @@ static void builtins(C *c) {
   Value *truth = mk_two(c, V_SUM, unit, unit);
   Global *g = add_global(c, "Nat", G_DEF, mk_type(c, 0), 1);
   g->value = nat;
+  Global *addr = add_global(c, "EvmAddress", G_DEF, mk_type(c, 0), 1);
+  addr->value = mk(c, V_ADDR_TYPE);
   prim_global(c, "natAdd", P_ADD, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
   prim_global(c, "natSub", P_SUB, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
   prim_global(c, "natEq", P_EQ, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, truth)));
@@ -1329,6 +1350,43 @@ static int members_ok(C *c, const Program *p) {
     fail(c, "REFUSE_MEMBERS", d != NULL ? d->loc : start,
          "the first declaration must be def members : Nat := N with N >= 1");
   return ok;
+}
+
+/* M4 (R6, both regimes): a program `def memberAddresses : Addresses` lists
+ * one address for each member, each below 2^160, and no address twice.
+ * Positions count from 1; 0 means no such address. */
+static int is_acons(const Value *v) {
+  return v->kind == V_CON && same(v->global->name, "acons") && v->nargs == 2 && v->args[0]->kind == V_ADDR;
+}
+
+static int addresses_ok(C *c) {
+  Global *g = find_global(c, "memberAddresses");
+  Global *family = find_global(c, "Addresses");
+  if (g == NULL || g->prelude || family == NULL)
+    return 1;
+  c->def = span_of(g->name);
+  c->fuel = CHECK_FUEL;
+  Loc loc = g->decl != NULL ? g->decl->loc : c->loc;
+  const Value *v = conv(c, g->type, family->value, 0) ? g->value : &c->bad;
+  size_t n = 0, range = 0, repeat = 0;
+  for (; is_acons(v); v = v->args[1], n++) {
+    const unsigned char *a = v->args[0]->addr;
+    int high = 0;
+    for (size_t i = 0; i < 12; i++)
+      high |= a[i];
+    range = range == 0 && high != 0 ? n + 1 : range;
+    for (const Value *w = v->args[1]; repeat == 0 && is_acons(w); w = w->args[1])
+      repeat = memcmp(w->args[0]->addr, a, 32) == 0 ? n + 1 : 0;
+  }
+  int count = v->kind == V_CON && same(v->global->name, "anil") && n == c->members;
+  if (!count)
+    fail(c, "REFUSE_ADDRESS_COUNT", loc, "def memberAddresses : Addresses must list %u addresses, one for each member",
+         c->members);
+  if (count && range != 0)
+    fail(c, "REFUSE_ADDRESS_RANGE", loc, "the address at position %zu must be below 2^160 (40 hex digits)", range);
+  if (count && range == 0 && repeat != 0)
+    fail(c, "REFUSE_ADDRESS_REPEAT", loc, "the address at position %zu occurs again later in the list", repeat);
+  return !c->failed;
 }
 
 static void find_regime(C *c) {
@@ -1377,7 +1435,7 @@ int escrow_check(Arena *arena, const Program *prelude, const Program *program, E
     check_decl(c, prelude, i, 1);
   for (size_t i = 1; i < program->ndecls; i++)
     check_decl(c, program, i, 0);
-  if (!c->failed)
+  if (!c->failed && addresses_ok(c))
     find_regime(c);
   return c->failed ? ESCROW_EXIT_REFUSED : ESCROW_EXIT_OK;
 }

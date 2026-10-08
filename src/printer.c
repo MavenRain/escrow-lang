@@ -24,6 +24,7 @@ static int ends_open(const Ast *ast) {
     return ends_open(ast->u.bind.body);
   case AST_VAR:
   case AST_NAT:
+  case AST_ADDR:
   case AST_TYPE:
   case AST_APP:
   case AST_PAIR:
@@ -44,6 +45,7 @@ static Place tightest(const Ast *ast) {
   switch (ast->kind) {
   case AST_VAR:
   case AST_NAT:
+  case AST_ADDR:
   case AST_PAIR:
   case AST_PROJ:
     return AT_ARG;
@@ -133,6 +135,16 @@ static void print_match(FILE *out, const Ast *ast) {
   }
 }
 
+/* 0x and 40 lowercase hex digits below 2^160, else 0x and 64. */
+static void print_addr(const unsigned char *bytes, FILE *out) {
+  size_t from = 12;
+  for (size_t i = 0; i < 12; i++)
+    from = bytes[i] != 0 ? 0 : from;
+  fputs("0x", out);
+  for (size_t i = from; i < 32; i++)
+    fprintf(out, "%02x", bytes[i]);
+}
+
 static void print_bare(FILE *out, const Ast *ast) {
   switch (ast->kind) {
   case AST_VAR:
@@ -140,6 +152,9 @@ static void print_bare(FILE *out, const Ast *ast) {
     return;
   case AST_NAT:
     fprintf(out, "%llu", ast->u.nat);
+    return;
+  case AST_ADDR:
+    print_addr(ast->u.addr, out);
     return;
   case AST_TYPE:
     fprintf(out, "Type %u", ast->u.level);

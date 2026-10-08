@@ -372,6 +372,55 @@ def claimAt : Claims -> Nat -> Claim :=
       (fun (i : Nat) => tuple (0, tuple (0, 0)))
       cs 0
 
+-- `Addresses` lists the member addresses of a program (M4, R7).  It has
+-- the set of defs that `Claims` has (O8).  Past the end `addressAt` gives
+-- 0x0, so the lookup is total.
+mu Addresses : Type 0 :=
+  | anil : Addresses
+  | acons (h : EvmAddress) (t : Addresses) : Addresses
+
+def rec foldAddresses : (0 B : Type 0) -> (EvmAddress -> B -> B) -> B -> Addresses -> B :=
+  fun (0 B : Type 0) (f : EvmAddress -> B -> B) (z : B) (xs : Addresses) =>
+    match xs as w in Addresses return B with
+    | anil => z
+    | acons h t => f h (foldAddresses B f z t)
+
+def appendAddresses : Addresses -> Addresses -> Addresses :=
+  fun (xs : Addresses) (ys : Addresses) =>
+    foldAddresses Addresses (fun (h : EvmAddress) (t : Addresses) => acons h t) ys xs
+
+def pureAddresses : EvmAddress -> Addresses := fun (a : EvmAddress) => acons a anil
+
+def mapAddresses : (EvmAddress -> EvmAddress) -> Addresses -> Addresses :=
+  fun (f : EvmAddress -> EvmAddress) (xs : Addresses) =>
+    foldAddresses Addresses (fun (h : EvmAddress) (t : Addresses) => acons (f h) t) anil xs
+
+def bindAddresses : Addresses -> (EvmAddress -> Addresses) -> Addresses :=
+  fun (xs : Addresses) (f : EvmAddress -> Addresses) =>
+    foldAddresses Addresses (fun (h : EvmAddress) (t : Addresses) => appendAddresses (f h) t) anil xs
+
+def filterAddresses : (EvmAddress -> Option (prod ())) -> Addresses -> Addresses :=
+  fun (p : EvmAddress -> Option (prod ())) (xs : Addresses) =>
+    foldAddresses Addresses
+      (fun (h : EvmAddress) (t : Addresses) =>
+        case p h with
+        | 0 (u : prod ()) => t
+        | 1 (u : prod ()) => acons h t)
+      anil xs
+
+def addressCount : Addresses -> Nat := fun (xs : Addresses) =>
+  foldAddresses Nat (fun (a : EvmAddress) (n : Nat) => natAdd n 1) 0 xs
+
+def addressAt : Addresses -> Nat -> EvmAddress :=
+  fun (xs : Addresses) (k : Nat) =>
+    foldAddresses (Nat -> EvmAddress)
+      (fun (h : EvmAddress) (t : Nat -> EvmAddress) (i : Nat) =>
+        case natEq i k with
+        | 0 (u : prod ()) => t (natAdd i 1)
+        | 1 (u : prod ()) => h)
+      (fun (i : Nat) => 0x0)
+      xs 0
+
 -- Design E: the ledger, the credit, the claims, then the closed map.
 def Escrow : Type 0 := prod (Ledger, prod (Ledger, prod (Claims, Closed)))
 
