@@ -2,8 +2,9 @@
  * bytecode of the contract EscrowDAO (SPEC section 7) directly.
  *
  * Storage: ledger (slot 0, address -> word), claimCount (slot 1), payer,
- * payee and amount (slots 2, 3 and 4, index -> word). A mapping entry
- * lives at keccak256(key . slot), as in Solidity.
+ * payee and amount (slots 2, 3 and 4, index -> word), and closed (slot 6,
+ * index -> word, 1 = closed, SPEC O4). Slot 5 is kept for the credit of
+ * SPEC O7. A mapping entry lives at keccak256(key . slot), as in Solidity.
  *
  * Arrow-Debreu: the orbit rule is a byte table at the end of the runtime
  * code, read with CODECOPY, so no entry can write it. Ballot codes 1, 2
@@ -27,14 +28,17 @@ enum {
   EVM_SIGNATURE = 256
 };
 
-enum { SLOT_LEDGER = 0, SLOT_COUNT = 1, SLOT_PAYER = 2, SLOT_PAYEE = 3, SLOT_AMOUNT = 4 };
+enum {
+  SLOT_LEDGER = 0, SLOT_COUNT = 1, SLOT_PAYER = 2, SLOT_PAYEE = 3, SLOT_AMOUNT = 4,
+  SLOT_CLOSED = 6
+};
 
 /* Memory: 0x00 to 0x3f is scratch for keccak256 and the table read. */
 enum { MEM_DECISION = 0x80, MEM_PAYER = 0xa0, MEM_AMOUNT = 0xc0, MEM_BALANCE = 0xe0 };
 
 typedef enum {
   OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_LT = 0x10, OP_GT = 0x11,
-  OP_EQ = 0x14, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLVALUE = 0x34,
+  OP_EQ = 0x14, OP_ISZERO = 0x15, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLVALUE = 0x34,
   OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36, OP_CODECOPY = 0x39,
   OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52, OP_SLOAD = 0x54,
   OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_JUMPDEST = 0x5b,
@@ -369,12 +373,37 @@ static void credit_payee(Asm *a) {
   op(a, OP_SSTORE);
 }
 
-/* settle c x: guard amount c <= balance (payer c) (the proof h), then the
- * release, refund or hold leg of design section 3 by the decision. */
+/* Reverts unless c < claimCount and claim c is open (SPEC O4). */
+static void open_guard(Asm *a) {
+  push(a, SLOT_COUNT);
+  op(a, OP_SLOAD);
+  argument(a, 0);
+  op(a, OP_LT);
+  op(a, OP_ISZERO);
+  revert_if(a);
+  argument(a, 0);
+  slot(a, SLOT_CLOSED);
+  op(a, OP_SLOAD);
+  revert_if(a);
+}
+
+/* closed c := 1 (SPEC O4). */
+static void close_claim(Asm *a) {
+  push(a, 1);
+  argument(a, 0);
+  slot(a, SLOT_CLOSED);
+  op(a, OP_SSTORE);
+}
+
+/* settle c x: guard c < claimCount and claim c open, guard amount c <=
+ * balance (payer c) (the proof h), then the release, refund or hold leg
+ * of design section 3 by the decision. Release and refund close claim c,
+ * hold leaves it open. */
 static void settle(Asm *a, unsigned members) {
   entry(a, LABEL_SETTLE, members + 1, ENTRY_NONPAYABLE);
   tally(a, 1, members);
   store(a, MEM_DECISION);
+  open_guard(a);
   argument(a, 0);
   slot(a, SLOT_PAYER);
   op(a, OP_SLOAD);
@@ -403,9 +432,11 @@ static void settle(Asm *a, unsigned members) {
   jumpdest(a, LABEL_RELEASE);
   debit_payer(a);
   credit_payee(a);
+  close_claim(a);
   jump(a, LABEL_DONE);
   jumpdest(a, LABEL_REFUND);
   debit_payer(a);
+  close_claim(a);
   jumpdest(a, LABEL_DONE);
   load(a, MEM_DECISION);
   return_top(a);

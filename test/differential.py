@@ -7,7 +7,9 @@ ballot outermost. The contract side deploys the creation code of `escrowc
 build` in geth evm, then runs `amend`, and `cast` and `settle` on each
 ballot vector. Each `cast` and `settle` result must equal the checker digit,
 and `amend` must return the packed `escrowc table` codes. No verdict comes
-from Python. Run `make` first.
+from Python. Storage effects, including O4 claim closing, are checked
+against a Python model, not source `settle` evaluation (SPEC section 1).
+Run `make` first.
 
 usage: python3 test/differential.py [--program PROG]
 """
@@ -81,11 +83,14 @@ def claim():
 
 def settled(code):
     # Design section 3: release moves the amount, refund debits it, hold keeps it.
+    # SPEC O4: release and refund close the claim, hold leaves it open.
     before = claim()
     debit = AMOUNT if code in (1, 2) else 0
     credit = AMOUNT if code == 1 else 0
+    closed = 1 if code in (1, 2) else 0
     return {**before, S.slot(S.LEDGER, PAYER): before[S.slot(S.LEDGER, PAYER)] - debit,
-            S.slot(S.LEDGER, PAYEE): before[S.slot(S.LEDGER, PAYEE)] + credit}
+            S.slot(S.LEDGER, PAYEE): before[S.slot(S.LEDGER, PAYEE)] + credit,
+            S.slot(S.CLOSED, 0): closed}
 
 
 def main():
@@ -108,7 +113,8 @@ def main():
         S.expect(f'differential-settle-{index}', runtime, S.data('settle', 0, *vector),
                  claim(), settled(code), code)
     print(f'DIFFERENTIAL vectors={len(vectors)} '
-          f'codes={"".join(map(str, verdicts.values()))} amend,cast,settle geth=escrowc OK '
+          f'codes={"".join(map(str, verdicts.values()))} '
+          f'amend,verdicts geth=escrowc storage=python-model OK '
           f'(logs: {WORK})')
 
 

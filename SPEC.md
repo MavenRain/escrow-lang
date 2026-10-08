@@ -21,6 +21,16 @@ prelude operations by the checker is the executable meaning.
 `test/differential.py` runs each ballot vector through `escrowc verdicts`
 and through the contract in geth, and compares the results.
 
+M3 chunk 1 implements O4 claim closing in the EVM writer only. The source
+prelude still takes a `Claim` value, retains it after settlement, and has
+no membership or open-claim premise. For example, `claimsAfterSettle` in
+`examples/programs/arrow-debreu.esc` still proves a count of 1 after
+release. Source settlement state and replay behavior therefore do not yet
+model the O4 runtime in section 7. Aligning the prelude and its examples
+with stable claim indices remains pending M3 work. The differential test
+compares verdicts with the checker and storage with a Python model; it
+does not establish agreement with source settlement state.
+
 ## 2. Programs
 
 A program is one `.esc` file of definitions in the subset of assay syntax
@@ -209,8 +219,9 @@ range). The Arrow-impossibility writer has no verdict table and no
   writes no storage.
 - Storage slot 0 is the ledger, a mapping from address to word. The claims
   are a count (slot 1) and three mappings from index to payer (slot 2),
-  payee (slot 3) and amount (slot 4). A mapping slot is keccak256 of the
-  key word and the base slot word.
+  payee (slot 3) and amount (slot 4). Slot 6 maps an index to its closed
+  flag: 1 is closed and 0 is open (O4). Slot 5 is kept for the credit of
+  O7. A mapping slot is keccak256 of the key word and the base slot word.
 - Each selector is keccak256 of the signature with `uint256` words, which
   `escrowc` computes when it writes the code. Short calldata and an unknown
   selector revert.
@@ -224,11 +235,13 @@ range). The Arrow-impossibility writer has no verdict table and no
 - `cast(b1, ..., bn)` computes the tally and returns the verdict. It writes
   nothing.
 - `settle(c, b1, ..., bn)` computes the verdict and branches to the
-  release, refund or hold leg of design section 3. The proof `h` becomes
-  the guard `n <= ledger p` before the branch, including hold. Release
-  moves `n` from `p` to `q` with an overflow guard, refund debits `n` from
-  `p`, and hold writes nothing. It returns the verdict. A failed guard
-  reverts.
+  release, refund or hold leg of design section 3. Before the branch, it
+  reverts unless `c` is less than the claim count and claim `c` is open
+  (O4). Then the proof `h` becomes the guard `n <= ledger p`, including
+  hold. Release moves `n` from `p` to `q` with an overflow guard, refund
+  debits `n` from `p`, and both close claim `c`. Hold writes nothing, so
+  the claim stays open and a later `settle` can decide it. It returns the
+  verdict. A failed guard reverts.
 - `amend()` takes no argument at the canonical `Phi`. It returns the packed
   verdict table `sum C_i * 4^i` and writes nothing (O5).
 - `cast`, `settle` and `amend` revert on a call value. At Arrow-impossibility

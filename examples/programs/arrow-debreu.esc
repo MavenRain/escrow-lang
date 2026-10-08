@@ -48,6 +48,6 @@ def h1 : Le 5 (balance s1.0 1) := (0, reflNat 5)
 def s2 : Escrow := settle F agg x c1 s1 h1
 def payerAfterSettle : EqNat (balance s2.0 1) 0 := reflNat 0
 def payeeAfterSettle : EqNat (balance s2.0 2) 5 := reflNat 5
--- settle keeps the claim (SPEC open item O4).
+-- Source settle still keeps the claim; the EVM closes it (SPEC section 1).
 def claimsAfterSettle : EqNat (countClaims s2.1) 1 := reflNat 1
 def dao : EscrowDAO F := (agg, s2)

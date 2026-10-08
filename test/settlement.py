@@ -23,6 +23,7 @@ GENESIS = dict(config=CONFIG, coinbase='0x' + '00' * 20, difficulty='0x0', gasLi
                excessBlobGas='0x0', blobGasUsed='0x0')
 CODES = (3, 3, 2, 2, 3, 3, 2, 1, 1, 1)
 LEDGER, COUNT, PAYER, PAYEE, AMOUNT = range(5)
+CLOSED = 6
 
 
 def require(ok, message):
@@ -163,6 +164,7 @@ def debreu_cases(runtime):
                     result = decision
                     after[slot(LEDGER, payer)] -= 5 if decision in (1, 2) else 0
                     after[slot(LEDGER, payee)] += 5 if decision == 1 else 0
+                    after[slot(CLOSED, 0)] = 1 if decision in (1, 2) else 0
                 expect(f'settle-{decision}-{same}-{balance}', runtime,
                        data('settle', 0, *ballots), before, after, result)
                 cases += 1
@@ -172,6 +174,35 @@ def debreu_cases(runtime):
     for ballot in (0, 4):
         expect(f'bad-ballot-{ballot}', runtime, data('settle', 0, ballot, 1, 3), before, before, None)
     return cases + 3
+
+
+def closing_cases(runtime):
+    # SPEC O4: settle c reverts unless c < claimCount and claim c is open.
+    # Release and refund close claim c, hold leaves it open.
+    release, refund, hold = (1, 1, 3), (2, 2, 3), (3, 3, 3)
+    claim = {COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34, slot(AMOUNT, 0): 5,
+             slot(LEDGER, 17): 20, slot(LEDGER, 34): 10}
+    rows = [('bound-count', 1, claim), ('bound-max', 2**256 - 1, claim),
+            ('bound-empty', 0, {slot(LEDGER, 17): 20})]
+    for label, index, before in rows:
+        expect(f'settle-{label}', runtime, data('settle', index, *release), before, before, None)
+    released = {**claim, slot(LEDGER, 17): 15, slot(LEDGER, 34): 15, slot(CLOSED, 0): 1}
+    refunded = {**claim, slot(LEDGER, 17): 15, slot(CLOSED, 0): 1}
+    expect('hold-open', runtime, data('settle', 0, *hold), claim, claim, 3)
+    expect('hold-then-release', runtime, data('settle', 0, *release), claim, released, 1)
+    expect('close-refund', runtime, data('settle', 0, *refund), claim, refunded, 2)
+    again = 0
+    for label, closed in (('release', released), ('refund', refunded)):
+        for name, ballots in (('release', release), ('refund', refund), ('hold', hold)):
+            expect(f'settle-after-{label}-{name}', runtime, data('settle', 0, *ballots),
+                   closed, closed, None)
+            again += 1
+    two = {**claim, COUNT: 2, slot(PAYER, 1): 34, slot(PAYEE, 1): 17, slot(AMOUNT, 1): 3}
+    first = {**two, slot(LEDGER, 34): 7, slot(LEDGER, 17): 23, slot(CLOSED, 1): 1}
+    both = {**first, slot(LEDGER, 17): 18, slot(LEDGER, 34): 12, slot(CLOSED, 0): 1}
+    expect('close-index-1', runtime, data('settle', 1, *release), two, first, 1)
+    expect('open-index-0', runtime, data('settle', 0, *release), first, both, 1)
+    return len(rows) + 3 + again + 2
 
 
 def entry_cases(runtime, regime):
@@ -201,7 +232,7 @@ def main():
     cases = refusals()
     runtime = bytecode('runtime', 3, 'debreu', *CODES)
     deploy('debreu-deploy', bytecode('creation', 3, 'debreu', *CODES), runtime)
-    cases += debreu_cases(runtime) + entry_cases(runtime, 'debreu')
+    cases += debreu_cases(runtime) + closing_cases(runtime) + entry_cases(runtime, 'debreu')
     packed = sum(code * 4**index for index, code in enumerate(CODES))
     expect('amend', runtime, data('amend'), {}, {}, packed)
     expect('amend-value', runtime, data('amend'), {}, {}, None, value=1)
