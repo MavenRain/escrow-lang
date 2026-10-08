@@ -1,185 +1,120 @@
 #!/usr/bin/env python3
-"""Compare kernel evaluation of the program rule with the emitted contract.
+"""Compare the escrowc checker with the contract that escrowc writes.
 
-The kernel side evaluates the rule `F` of the Arrow-Debreu example on each
-ballot vector. The kernel prints no normal forms, so a wrong `reflNat`
-candidate gives the value in its error text (probe P3). That value is only
-a hint: one kernel file then checks each value with `reflNat`, and that
-check is the certificate. The contract side runs the constructor, then
-`cast` and `settle`, in the Assay model and in geth. No expected verdict
-comes from Python.
+The checker side is `escrowc verdicts PROG F`: one digit per ballot vector,
+in the order of itertools.product over the codes 1, 2 and 3, with the first
+ballot outermost. The contract side deploys the creation code of `escrowc
+build` in geth evm, then runs `amend`, and `cast` and `settle` on each
+ballot vector. Each `cast` and `settle` result must equal the checker digit,
+and `amend` must return the packed `escrowc table` codes. No verdict comes
+from Python. Run `make` first.
 
-usage: python3 -P test/differential.py [--contract PATH]
+usage: python3 test/differential.py [--program PROG]
 """
 import argparse
-import functools
-import importlib.util
 import itertools
-import json
-import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
+
+import settlement as S
 
 ROOT = Path(__file__).resolve().parent.parent
-ASSAY = ROOT / '.tools/assay'
+ESCROWC = ROOT / 'build/escrowc'
 WORK = ROOT / '.gatework/differential'
-sys.path.insert(0, str(ASSAY / 'dev'))
-spec = importlib.util.spec_from_file_location('escrow_context', ASSAY / 'dev/context-test.py')
-C = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(C)
-C.WORK = WORK
-
-PROGRAM = ROOT / 'examples/programs/arrow-debreu.asy'
-FIXTURE = ROOT / 'examples/contracts/arrow-debreu.asy'
-NAMES = {1: 'release', 2: 'refund', 3: 'hold'}
-GROUP = 9
-LAYOUT = ('ledger', 'claimCount', 'payer', 'payee', 'amount', 'weight', 'verdict')
+PROGRAM = ROOT / 'examples/programs/arrow-debreu.esc'
+CODES = (1, 2, 3)
+PAYER, PAYEE, AMOUNT = 17, 34, 5
 
 
-def members():
-    first = PROGRAM.read_text().splitlines()[0]
+def escrowc(*args, lines=1):
+    result = subprocess.run([str(ESCROWC), *map(str, args)], text=True,
+                            capture_output=True, timeout=120)
+    S.require(result.returncode == 0 and result.stderr == '',
+              f'escrowc {args[0]}: exit {result.returncode}: {result.stderr.strip()[:400]}')
+    S.require(result.stdout.count('\n') == lines and result.stdout.endswith('\n' * lines),
+              f'escrowc {args[0]}: not {lines} line(s) on stdout')
+    return result.stdout.strip()
+
+
+def members(program):
+    first = program.read_text().splitlines()[0]
     found = re.fullmatch(r'def members : Nat := ([0-9]+)', first)
-    C.require(found is not None, f'line 1 of {PROGRAM} must be def members : Nat := N')
+    S.require(found is not None, f'line 1 of {program} must be def members : Nat := N')
     return int(found.group(1))
 
 
-def verdict_term(vector):
-    ballots = functools.reduce(lambda rest, code: f'bcons {NAMES[code]} ({rest})',
-                               reversed(vector), 'bnil')
-    return f'decCode (F (mkConfig ({ballots}) (reflNat {len(vector)})))'
-
-
-def packed(vectors):
-    terms = [verdict_term(vector) for vector in vectors]
-    return functools.reduce(lambda rest, term: f'natAdd ({term}) (natMul 4 ({rest}))',
-                            reversed(terms[:-1]), terms[-1])
-
-
-def kernel_file(definitions):
-    program = subprocess.run(['zsh', str(ROOT / 'prelude/assemble.sh'), str(PROGRAM)],
-                             capture_output=True, text=True, check=True).stdout
-    return '\n'.join([program,
-                      'def decCode : Decision -> Nat := fun (d : Decision) => decide Nat 1 2 3 d',
-                      *definitions, ''])
-
-
-def kernel_check(label, text):
-    path = C.WORK / f'{label}.asy'
-    path.write_text(text)
-    status = subprocess.run(['zsh', str(ROOT / 'probe/run.sh'), label, 'check', str(path)],
-                            env={**os.environ, 'TMPDIR': str(C.WORK)},
-                            capture_output=True, text=True).returncode
-    log = C.WORK / 'escrow-probe/logs' / f'{label}.err'
-    return status, log.read_text() if log.exists() else ''
-
-
-def hint(index, vectors):
-    # Run 1: a wrong candidate. Every code is 1, 2 or 3, so 0 is wrong.
-    status, error = kernel_check(f'hint-{index}', kernel_file([
-        f'def diffCode : Nat := {packed(vectors)}',
-        'def diffOk : EqNat diffCode 0 := reflNat 0']))
-    C.require(status != 0, f'hint {index}: the kernel accepted the wrong candidate 0')
-    found = re.search(r'the type asks for ([0-9]+)', error)
-    C.require(found is not None, f'hint {index}: no value in the kernel error')
-    value = int(found.group(1))
-    codes = [value // 4 ** place % 4 for place in range(len(vectors))]
-    C.require(value < 4 ** len(vectors) and all(code in NAMES for code in codes),
-              f'hint {index}: value {value} is not {len(vectors)} codes in 1..3')
+def table(program, size):
+    words = escrowc('table', program).split()
+    S.require(words[:2] == ['debreu', str(size)], f'table is not debreu {size}: {words[:2]}')
+    codes = tuple(map(int, words[2:]))
+    S.require(len(codes) == (size + 1) * (size + 2) // 2 and set(codes) <= set(CODES),
+              f'table has {len(codes)} codes, not one code in 1..3 per tally')
     return codes
 
 
-def kernel_verdicts(vectors):
-    groups = [vectors[start:start + GROUP] for start in range(0, len(vectors), GROUP)]
-    codes = [code for index, group in enumerate(groups) for code in hint(index, group)]
-    status, error = kernel_check('certificate', kernel_file([
-        f'def diffOk{index} : EqNat ({verdict_term(vector)}) {code} := reflNat {code}'
-        for index, (vector, code) in enumerate(zip(vectors, codes))]))
-    C.require(status == 0, f'the certificate file was refused: {error.strip()[:400]}')
-    return dict(zip(vectors, codes))
+def checker_verdicts(program, vectors):
+    digits = escrowc('verdicts', program, 'F')
+    S.require(len(digits) == len(vectors) and set(digits) <= set('123'),
+              f'verdicts gave {len(digits)} digits for {len(vectors)} vectors')
+    return dict(zip(vectors, map(int, digits)))
 
 
-@functools.cache
-def slot(base, key):
-    # Independent keccak oracle, not Assay's mapping-slot implementation.
-    digest = C.checked(f'slot-{base}-{key}',
-                       ['cast', 'keccak', f'0x{key:064x}{base:064x}']).strip()
-    return int(digest, 16)
+def contract(program):
+    def part(name, *flags):
+        out = WORK / f'{name}.hex'
+        escrowc('build', program, *flags, '-o', out, lines=0)
+        return out.read_text().strip()
+
+    creation, runtime = part('creation'), part('runtime', '--runtime')
+    S.deploy('differential-deploy', creation, runtime)
+    return runtime
 
 
-def data(name, *values):
-    signature = name + '(' + ','.join(['uint256'] * len(values)) + ')'
-    selector = C.checked('selector-' + name, ['cast', 'sig', signature]).strip()[2:]
-    return selector + ''.join(f'{value:064x}' for value in values)
+def claim():
+    return {S.COUNT: 1, S.slot(S.PAYER, 0): PAYER, S.slot(S.PAYEE, 0): PAYEE,
+            S.slot(S.AMOUNT, 0): AMOUNT, S.slot(S.LEDGER, PAYER): 20,
+            S.slot(S.LEDGER, PAYEE): 10}
 
 
-def results(name, path, runtime, calldata, before):
-    arguments = [C.BINARY, 'run', str(path), '--calldata', calldata,
-                 *[part for key, value in before.items() for part in ('--storage', f'{key}={value}')]]
-    model = json.loads(C.checked('model-' + name, arguments, timeout=90))
-    actual, _ = C.evm_run(name, runtime, calldata, C.SENDER,
-                          slots={hex(key): hex(value) for key, value in before.items() if value})
-    return model, actual
-
-
-def contract_verdicts(source, vectors):
-    path, output, runtime = C.emit('differential', source.read_text())
-    layout = json.loads((output / 'layout.json').read_text())
-    C.require([(row['label'], int(row['slot'])) for row in layout['storage']] ==
-              list(zip(LAYOUT, range(len(LAYOUT)))), 'unexpected storage layout')
-    created, raw = C.evm_run('constructor', (output / 'init.hex').read_text().strip(),
-                             '', C.SENDER, create=True)
-    deployed = [words for words in raw['storage'].values() if words]
-    C.require(created['status'] == 'success' and len(deployed) == 1,
-              f'constructor failed or wrote {len(deployed)} accounts')
-    # The tables come from the constructor run, not from the codes.
-    tables = {int(key, 0): int(value, 0) for key, value in deployed[0].items()}
-    claim = {**tables, 1: 1, slot(2, 0): 17, slot(3, 0): 34, slot(4, 0): 5,
-             slot(0, 17): 20, slot(0, 34): 10}
-
-    def verdict(label, calldata, before):
-        model, actual = results(label, path, runtime, calldata, before)
-        return {'model': model, 'evm': actual}
-
-    return {vector: {'cast': verdict(f'cast-{index}', data('cast', *vector), tables),
-                     'settle': verdict(f'settle-{index}', data('settle', 0, *vector), claim)}
-            for index, vector in enumerate(vectors)}
-
-
-def mismatches(kernel, contract):
-    return [(vector, entry, engine, run['status'], int(run['output'], 16), code)
-            for vector, code in kernel.items()
-            for entry, engines in contract[vector].items()
-            for engine, run in engines.items()
-            if (run['status'], run['output']) != ('success', f'0x{code:064x}')]
+def settled(code):
+    # Design section 3: release moves the amount, refund debits it, hold keeps it.
+    before = claim()
+    debit = AMOUNT if code in (1, 2) else 0
+    credit = AMOUNT if code == 1 else 0
+    return {**before, S.slot(S.LEDGER, PAYER): before[S.slot(S.LEDGER, PAYER)] - debit,
+            S.slot(S.LEDGER, PAYEE): before[S.slot(S.LEDGER, PAYEE)] + credit}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--contract', type=Path, default=FIXTURE)
-    source = parser.parse_args().contract.resolve()
-    C.require(shutil.which('evm') and shutil.which('cast'), 'evm and cast are required')
+    parser.add_argument('--program', type=Path, default=PROGRAM)
+    program = parser.parse_args().program.resolve()
+    S.require(shutil.which('evm') and shutil.which('cast'), 'evm and cast are required')
+    S.require(ESCROWC.exists(), f'{ESCROWC} is missing: run make')
     WORK.mkdir(parents=True, exist_ok=True)
-    C.WORK = Path(tempfile.mkdtemp(prefix='run-', dir=WORK))
-    # Verify the dependency before using its test helpers and binary.
-    subprocess.run([sys.executable, '-P', str(ROOT / 'toolchain/assay.py'),
-                    'check', str(source)], check=True)
-    vectors = tuple(itertools.product(tuple(NAMES), repeat=members()))
-    kernel = kernel_verdicts(vectors)
-    contract = contract_verdicts(source, vectors)
-    wrong = mismatches(kernel, contract)
-    C.require(not wrong, f'{len(wrong)} kernel and contract differences, first: {wrong[:2]}')
-    print(f'DIFFERENTIAL vectors={len(vectors)} kernel=certified '
-          f'codes={"".join(map(str, kernel.values()))} cast,settle model=geth=kernel OK '
-          f'(logs: {C.WORK})')
+    S.WORK = WORK
+    size = members(program)
+    vectors = tuple(itertools.product(CODES, repeat=size))
+    codes = table(program, size)
+    verdicts = checker_verdicts(program, vectors)
+    runtime = contract(program)
+    packed = sum(code * 4**index for index, code in enumerate(codes))
+    S.expect('differential-amend', runtime, S.data('amend'), {}, {}, packed)
+    for index, (vector, code) in enumerate(verdicts.items()):
+        S.expect(f'differential-cast-{index}', runtime, S.data('cast', *vector), {}, {}, code)
+        S.expect(f'differential-settle-{index}', runtime, S.data('settle', 0, *vector),
+                 claim(), settled(code), code)
+    print(f'DIFFERENTIAL vectors={len(vectors)} '
+          f'codes={"".join(map(str, verdicts.values()))} amend,cast,settle geth=escrowc OK '
+          f'(logs: {WORK})')
 
 
 if __name__ == '__main__':
     try:
         main()
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f'DIFFERENTIAL FAIL: {error}', file=sys.stderr)
         sys.exit(1)

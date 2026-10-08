@@ -1,6 +1,7 @@
 # escrow-lang specification (draft)
 
-Status: draft before milestone M0. `escrow-lang` is a working name.
+Status: draft, milestone M2 (TinyCC host, section 10). `escrow-lang` is a
+working name.
 
 ## 1. Purpose
 
@@ -9,42 +10,56 @@ type formers of ledger-lang. Its core data types and core operations are only
 the types and operations of `design/DENOTATIONAL-DESIGN.md` (the design).
 
 A program gives a membership size, a constitution and, when one exists, an
-aggregation for that constitution. The compiler checks the program and writes
-two assay source files (section 8). Assay compiles the contract file to EVM
-bytecode. Assay is the
-host and the target (section 8).
+aggregation for that constitution. The compiler `escrowc` checks the program
+and writes the EVM bytecode of one contract (section 7). `escrowc` is the
+host, and it writes the target directly (section 8).
 
-The meaning of a program is the dependent pair of design section 2. The assay
-file is a representation of that pair. The compiler is correct when each
-entry of the assay file denotes the operation of design section 3. Kernel
-evaluation of the prelude operations is the executable meaning. A test runs
-one call sequence through kernel evaluation and through `assay run`, and
-compares the two final states.
+The meaning of a program is the dependent pair of design section 2. The
+contract is a representation of that pair. The compiler is correct when each
+contract entry denotes the operation of design section 3. Evaluation of the
+prelude operations by the checker is the executable meaning.
+`test/differential.py` runs each ballot vector through `escrowc verdicts`
+and through the contract in geth, and compares the results.
 
 ## 2. Programs
 
-A program is one file of assay definitions (section 8):
+A program is one `.esc` file of definitions in the subset of assay syntax
+that the prelude uses (section 8):
 
 ```
 def members : Nat := N
 def NAME : TYPE := TERM
 ```
 
-The first definition must be `members` with a literal. It fixes the number
-of members. The core types `Config` and `Tally` (section 4) read it.
+The first definition must be `members` with a positive integer literal no
+larger than C's `UINT_MAX`, otherwise `REFUSE_MEMBERS`.
+It fixes the number of members. The core types `Config` and `Tally`
+(section 4) read it. `escrowc` checks `members` first, then the prelude,
+then the rest of the program.
 
-The compiler refuses these assay forms in a program: `mu`, `nu`, `axiom`,
-`def rec`, `contract`, `storage`, `entry`, `payable`, `constructor`,
-`fallback`, `error`, `invariant`, `predicate`, `proof`, `guard`, `sload` and
-`sstore`. It also refuses a definition that uses a prelude name. Thus a
-program cannot add a data type, an unproved fact or general recursion.
-Recursion comes only from `fold` (O9 RULED). The compiler writes the
-contract; a program cannot.
+`escrowc` refuses these forms in a program: `mu` (`REFUSE_MU`), `def rec`
+(`REFUSE_REC`), and `nu`, `axiom`, `contract`, `storage`, `entry`,
+`payable`, `constructor`, `fallback`, `error`, `invariant`, `predicate`,
+`proof`, `guard`, `sload` and `sstore` (`REFUSE_FORM`). It also refuses a
+definition that uses a prelude name (`REFUSE_PRELUDE_NAME`). Thus a program
+cannot add a data type, an unproved fact or general recursion. Recursion
+comes only from `fold` (O9 RULED). The compiler writes the contract; a
+program cannot.
+
+A program that does not check is refused with a `TYPE_` code: `TYPE_SCOPE`,
+`TYPE_DUPLICATE`, `TYPE_MISMATCH`, `TYPE_INFER`, `TYPE_SHAPE`,
+`TYPE_UNIVERSE`, `TYPE_ERASED`, `TYPE_MATCH`, `TYPE_MU`, `TYPE_REC`,
+`TYPE_NAT`, `TYPE_FUEL` or `TYPE_INTERNAL`. A mismatch prints both normal
+forms (` expected E, found F`). The lexer and parser codes are `LEX_TOKEN`,
+`LEX_NUMBER`, `PARSE_EXPECT`, `PARSE_PAREN`, `PARSE_ARITY`, `PARSE_DEPTH`
+and `MEMORY`. A refusal is one line on stderr, `escrowc: CODE: DEF:
+message`, and exit 1. A usage or IO error exits 2. `test/refusal.sh` and
+the mutant in `test/mutants/` test the refusals.
 
 ## 3. Type formers
 
 The formers of ledger-lang `SPEC.md` section 3, in the assay forms that the
-prelude (`prelude/Prelude.asy`) uses. USER ruling 2026-10-06 (O8) fixes the
+prelude (`prelude/Prelude.esc`) uses. USER ruling 2026-10-06 (O8) fixes the
 equality and list rows.
 
 | Type former | Forms |
@@ -178,68 +193,86 @@ only proposals are identities and `propose p ; q` is vacuous (design section
 
 ## 7. What the compiler writes
 
-The compiler writes one contract `EscrowDAO` in assay surface syntax.
+`escrowc build PROG -o OUT` writes the creation code of one contract, and
+`escrowc build PROG --runtime -o OUT` writes its runtime code, each as one
+line of lowercase hex with no `0x`. The writer is `src/evm.c` (interface
+`src/evm.h`). Its input is the member count, the regime (section 6) and,
+for Arrow-Debreu, one decision code per tally from the checker (`escrowc
+table`; release 1, refund 2, hold 3; tallies in the order r = 0..n outer,
+f = 0..n-r inner, h = n-r-f).
 
-The writer is `gen/contract.sh`. It implements O12 (b) using the local
-Assay dependency in `toolchain/`: the base in `PIN` plus the recorded
-surface-branch patch. Its input is the member count, the regime and, for
-Arrow-Debreu, one decision code per tally from `gen/table.sh` (release 1,
-refund 2, hold 3).
+The Arrow-Debreu writer accepts 1 to 14 members (`EVM_LIMIT` outside that
+range). The Arrow-impossibility writer has no verdict table and no
+14-member limit; it accepts the member range of section 2.
 
-- `storage` holds the ledger as a mapping from address to word and the
-  claims as a count and three mappings from index to payer, payee and
-  amount.
-- The orbit rule `witness L` compiles to two lookup mappings that only the
-  constructor writes. It is the constitution code of design section 5.
-  `weight` maps the ballot codes 1, 2 and 3 to 1, `members + 1` and 0, so
-  the sum of the ballot weights is `r + (members + 1) f`, one key per
-  tally. `verdict` maps the key to the decision code. Each ballot is
-  guarded to be 1, 2 or 3.
-- `deposit` is payable. It guards `n <= callvalue`, credits `p` and appends
-  the claim. It returns the claim index.
-- `cast` takes the ballots, computes the tally and returns the verdict. It
-  writes nothing.
-- `settle` takes a claim index and the ballots, computes the verdict, and
-  branches to the release, refund or hold leg of design section 3. The
-  proof `h` becomes the guard `n <= balance p` before the branch, including
-  hold. A failed guard reverts.
-- `amend` takes no argument at the canonical `Phi`. It returns the packed
-  verdict table `sum C_i * 4^i` and writes nothing (open item O5).
+- The creation code reverts on a call value and returns the runtime. It
+  writes no storage.
+- Storage slot 0 is the ledger, a mapping from address to word. The claims
+  are a count (slot 1) and three mappings from index to payer (slot 2),
+  payee (slot 3) and amount (slot 4). A mapping slot is keccak256 of the
+  key word and the base slot word.
+- Each selector is keccak256 of the signature with `uint256` words, which
+  `escrowc` computes when it writes the code. Short calldata and an unknown
+  selector revert.
+- The orbit rule `witness L` is the verdict table, data in the runtime code
+  that `CODECOPY` reads. It is the constitution code of design section 5.
+  Each ballot must be 1, 2 or 3, else the call reverts. The counts r of
+  release and f of refund give the tally index.
+- `deposit(p, q, n)` is payable. It guards `n <= callvalue` and that `p`
+  and `q` are addresses, credits `n` to `p` with an overflow guard, and
+  appends the claim. It returns the claim index.
+- `cast(b1, ..., bn)` computes the tally and returns the verdict. It writes
+  nothing.
+- `settle(c, b1, ..., bn)` computes the verdict and branches to the
+  release, refund or hold leg of design section 3. The proof `h` becomes
+  the guard `n <= ledger p` before the branch, including hold. Release
+  moves `n` from `p` to `q` with an overflow guard, refund debits `n` from
+  `p`, and hold writes nothing. It returns the verdict. A failed guard
+  reverts.
+- `amend()` takes no argument at the canonical `Phi`. It returns the packed
+  verdict table `sum C_i * 4^i` and writes nothing (O5).
+- `cast`, `settle` and `amend` revert on a call value. At Arrow-impossibility
+  the contract has no verdict table and `cast` reverts.
 - Proof terms erase. Each guard is checked and its witness is dropped.
 
 ## 8. Host and target
 
-USER ruling 2026-10-06: escrow-lang is a restricted assay dialect. The facts
-behind the ruling are in `probe/CAPABILITY.md`.
+USER rulings 2026-10-07 replace the assay host of 2026-10-06. The host
+facts are in `probe/CAPABILITY.md`.
 
-- The host is the assay kernel. It checks the dependent types of a program
-  and evaluates its closed terms. escrow-lang has no checker of its own.
-- The target is two `.asy` files (O11 RULED 2026-10-06; probe-forced by
-  P6: `emit` checks each top-level definition). Assay has no import form,
-  so the kernel file holds `def members : Nat := N`, the prelude, the
-  program and the orbit table, in that order (probe-forced: the prelude
-  reads `members`). The contract file is one assay surface `contract`
-  with the storage, the entries and literal words only (P8 and O12).
-- Assay has no implicit arguments, so each prelude name takes its type
-  arguments explicitly (probe-forced).
-- The prelude (`prelude/Prelude.asy`, eight `-- @section` parts) defines
+1. The host is TinyCC. `escrowc` is C99, built with tcc 0.9.28rc, and it
+   does the dependent checking and evaluation that the assay kernel did.
+2. The surface is the current subset of assay syntax. Both example
+   programs check unchanged. The suffix is `.esc`.
+3. The target is EVM bytecode that `escrowc` writes directly. The assay
+   toolchain is not in the tree.
+
+- The checker (`src/check.c`) checks by normalization: Pi, Sigma, `*`
+  products, `sum` and `case`, fixed-index `mu` families with `match`,
+  structural `def rec`, `Type 0` and `Type 1`, erased binders and the
+  `Nat` builtins on literals. Conversion compares normal forms.
+- The prelude (`prelude/Prelude.esc`, eight `-- @section` parts) defines
   the forms of section 3 and the types and operations of sections 4 and 5
   (O8 RULED 2026-10-06): `EqNat`, `EqDec`, `EqTally`, `Decision`,
   `Ballots`, `Claims`, `Config`, `Tally` and `Aggregation` as `mu`
   families in `Type 0`, and `Option` and `Sum` as type functions over
-  `sum (..)`. Only the prelude uses `mu` and `def rec`.
-  `zsh prelude/assemble.sh PROGRAM` writes the target file in the order
-  above. M0 results: `probe/CAPABILITY.md`, "M0 prelude and examples".
-- The generator is a Bend 2 program, pinned to the assay commit in `PIN`.
-  It reads a program, applies the refusal list of section 2, tabulates the
-  orbit rule with the assay kernel (the packed code of P7), and writes the
-  kernel file and the contract file. It runs `assay check` and `assay
-  axioms` on both files and `assay emit` on the contract file.
-- USER ruling 2026-10-06: `assay axioms` reports no axiom for the prelude
-  and the program. For the contract file it reports only `EvmOpcodes`, the
-  marker of the assay core protocol that `emit` requires (`M0_PROTOCOL`;
-  `probe/CAPABILITY.md`, P1). The assay kernel accepts an axiom witness, so
-  this check is the generator's job.
+  `sum (..)`. Only the prelude uses `mu` and `def rec`. `make` embeds the
+  prelude in `escrowc` (`tools/embed.c` writes `build/prelude.c`).
+- The surface has no implicit arguments, so each prelude name takes its
+  type arguments explicitly.
+- The regime is Arrow-Debreu if and only if the program defines
+  `agg : Aggregation G` for a program definition `G : ChoiceRule`.
+- The command line:
+  - `escrowc check PROG` prints `ok debreu` or `ok impossibility`.
+  - `escrowc table PROG` prints `REGIME MEMBERS [CODES...]` on one line.
+    Arrow-Debreu tables are limited to 1000 members (`TABLE_LIMIT`).
+  - `escrowc verdicts PROG NAME` prints one digit per ballot vector of the
+    rule NAME, in the product order of `test/differential.py` (the first
+    ballot outermost), up to 10 members (`VERDICT_LIMIT`).
+  - `escrowc eval PROG NAME` prints the normal form of NAME.
+  - `escrowc build PROG [--runtime] -o OUT` writes the contract (section 7).
+- The surface has no axiom form that a program can use (section 2), so a
+  checked program has no unproved fact.
 
 ## 9. Open items
 
@@ -275,68 +308,44 @@ behind the ruling are in `probe/CAPABILITY.md`.
   eliminator, so fuel cannot be a `Nat`, and the prelude invents no fuel.
   The prelude has no `unfold`. RULED 2026-10-06 (USER): drop `unfold`.
   Recursion comes only from `fold` (section 2).
-- O10. Probe-forced (M0, 2026-10-06): the assay kernel refuses
-  `fun (s : S) => (s.1, s.2)` for `S := (n : Nat) * EqNat n 3`. The type
-  of `s.2` holds `s.1` without a return annotation, a written `s.1` holds
-  it with `as self return Nat`, and conversion does not identify the two.
-  Assay has no Sigma pattern (`match`, `case` and `let` on a pair do not
-  parse). Thus `Config`, `Tally` and `Aggregation F` are `mu` records read
-  by `match`, and the Sigma forms that stay (`IsSelfConstituting`,
-  `EscrowDAO`, `Le`) are built and never projected. RULED 2026-10-06
-  (USER): keep the `mu` records. Assay does not change.
-- O11. Probe-forced (M1, P6 in `probe/CAPABILITY.md`): `emit` checks each
-  top-level definition, and it refuses prelude section 7 and the program
-  scenario. Thus the target is two files, not the one file of section 8: a
-  kernel file (members line, prelude, program and orbit table) for `check`
-  and `axioms`, and a contract file (protocol, storage, entries and literal
-  words only) for `check`, `axioms` and `emit`. RULED 2026-10-06 (USER):
-  two files. The table comes from the kernel file by the packed code of
-  P7. The second `reflNat` check certifies it.
-- O12. Found in M1 (2026-10-06, document read, not ruled;
-  `probe/CAPABILITY.md`, "M1 contract form"): the assay surface form has
-  mappings with runtime keys and no two-way branch. The core `Tx` protocol
-  has the `le` branch and only constant slots. Section 7 needs both.
-  Options: (a) probe P8 first: a core `le` term in a surface body; (b) an
-  assay change that adds a surface branch (the assay tree has work in
-  flight); (c) a ledger of constant slots, one per address in a fixed
-  address set, in the core protocol. P8 FAILED (2026-10-06,
-  `probe/CAPABILITY.md`, P8): a surface body has no core term and no
-  branch. The staged writer uses (d), a surface contract with no branch
-  (section 7): the constructor writes two lookup mappings for the tally,
-  and `settle` is three entries, one per decision, each guarding its
-  decision. RULED 2026-10-06 (USER): (b). Assay gets a surface branch
-  statement that lowers to the core `le a b yes no`, and `settle` becomes
-  one entry with the case split of design section 3. The (d) writer is
-  the interim form until the assay branch lands. The implementation now
-  carries the surface branch as an escrow-local dependency patch, builds
-  only in `.tools/assay`, and emits one `settle` entry. No sibling checkout
-  is modified. The tally lookups need no
-  branch and can stay. The validated Arrow-Debreu range is `members <= 8`.
-  In the interim writer, 9 members hit the closed-specialization budget; at 10,
-  the mapping writes also exceed the 128-step constructor limit. This
-  bound keeps the packed `amend` table within one word. Zero members is
-  valid: its only tally is `(0, 0, 0)` and `cast` has no arguments.
+- O10. Probe-forced (M0, 2026-10-06): the assay kernel refused
+  `fun (s : S) => (s.1, s.2)` for `S := (n : Nat) * EqNat n 3`, and assay
+  has no Sigma pattern. Thus `Config`, `Tally` and `Aggregation F` are `mu`
+  records read by `match`, and the Sigma forms that stay
+  (`IsSelfConstituting`, `EscrowDAO`, `Le`) are built and never projected.
+  RULED 2026-10-06 (USER): keep the `mu` records. The TinyCC host keeps
+  them (section 8, ruling 2: the programs check unchanged).
+- O11. CLOSED 2026-10-07 by the TinyCC host (section 8). The assay target
+  was two `.asy` files, a kernel file and a contract file (RULED
+  2026-10-06), because `emit` checked each top-level definition. `escrowc`
+  checks the program and writes the bytecode in one run, and the verdict
+  table comes from the checker (`escrowc table`).
+- O12. CLOSED 2026-10-07 by the TinyCC host (section 8). The assay surface
+  form had no two-way branch, so O12 (b) carried a local assay patch for a
+  surface branch. `src/evm.c` writes the branch of `settle` directly, as
+  one entry with the case split of design section 3. The Arrow-Debreu range
+  is now members 1 to 14 (section 7, `probe/CAPABILITY.md`). All commands
+  refuse zero members during program checking (`REFUSE_MEMBERS`). The assay
+  text of O11 and O12 is in `git show 8351635:SPEC.md`.
+
 
 ## 10. Milestones
 
-- M0: probe items P1 to P4; the prelude with the formers, core types and
-  the four operations; the refusal list; example programs for the
-  Arrow-impossibility and Arrow-Debreu regimes, checked by `assay check`.
-- M1: the generator and the contract writer (section 7); differential
-  tests of kernel evaluation against `assay run` traces. Status
-  2026-10-06: probes P6, P7 and P8 are done (`probe/CAPABILITY.md`, O11,
-  O12). The contract writer (`gen/contract.sh`) and the table step
-  (`gen/table.sh`) are written. Both regimes pass `check`, `axioms` and
-  `emit` at members 3. O12 (b) is now carried as a local compiler patch
-  and `settle` is one entry. `test/settlement.py` checks model and emitted
-  EVM behavior against independent expectations. Status 2026-10-07:
-  `test/differential.py` compares dependent kernel evaluation with the
-  contract. The kernel evaluates the rule `F` of the Arrow-Debreu example
-  on all 27 ballot vectors at members 3. Three runs with a wrong candidate
-  give the values as hints, and one kernel file checks all 27 values with
-  `reflNat`. The contract takes its tables from its own constructor run.
-  Then `cast` and `settle` run in the Assay model and in geth, and each
-  result must equal the kernel value. A contract with one wrong table code
-  fails the test. The Bend 2 generator and the refusal test are not
-  started.
-- M2: open items O4 and O7, after a ruling.
+- M0 (2026-10-06): probe items P1 to P4; the prelude with the formers, core
+  types and the four operations; the refusal list; the example programs
+  for the Arrow-impossibility and Arrow-Debreu regimes, checked then by the
+  assay kernel.
+- M1 (2026-10-06 to 2026-10-07): the assay contract writer and the
+  differential test against `assay run` (O11, O12). M2 replaces it.
+- M2 (2026-10-07): the TinyCC host (section 8) in four chunks. (1) The EVM
+  back end `src/evm.c` and `test/settlement.py` (60 cases in geth). (2)
+  The lexer, the parser and the embedded prelude, with `test/parse.sh`.
+  (3) The checker and the `check`, `table`, `verdicts`, `eval` and `build`
+  verbs, with `test/check.sh`, `test/refusal.sh`, `test/normal-forms.py`
+  and the mutant `test/mutants/debreu-payee-4.esc`. (4)
+  `test/differential.py`: `escrowc verdicts PROG F` on all 27 ballot
+  vectors at members 3 against `cast` and `settle` in geth, and `escrowc
+  table` against `amend`. The assay toolchain, generator and probes leave
+  the tree. Gates: `make`, `make check-clang`, `make test`, `python3
+  test/settlement.py` and `python3 test/differential.py`.
+- M3: open items O4 and O7, after a ruling.
