@@ -13,6 +13,10 @@ bytecode of the escrow contract directly.
 - `probe/CAPABILITY.md`: what the TinyCC host can and cannot do.
 - `prelude/Prelude.esc`: the prelude that `escrowc` embeds.
 - `examples/programs/`: the Arrow-Debreu and Arrow-impossibility programs.
+  The Arrow-Debreu program deposits 5 from payer 1 to payee 2, settles
+  claim 0 by release, then withdraws the credit of the payee.
+  `payerAfterSettle`, `payeeAfterSettle`, `openAfterSettle` and
+  `creditAfterWithdraw` prove the state after each step.
 
 ## Build and test
 
@@ -27,7 +31,11 @@ python3 test/differential.py
 `make` needs `tcc` (0.9.28rc) and writes `build/escrowc`. `make
 check-clang` needs a clang `cc`. The settlement and differential tests
 need geth's `evm` (1.14.12) and foundry's `cast`. They write their logs
-under the ignored `.gatework/`.
+under the ignored `.gatework/`. `test/differential.py` compares the
+`escrowc verdicts` result of each ballot vector with `cast` and `settle`
+in geth. It also compares the geth storage after `settle` with `escrowc
+eval` of source `settle` (summary `storage=escrowc-eval`). The Python
+model `settled()` is a cross-check.
 
 ## Use
 
@@ -88,6 +96,11 @@ during the send. Each withdrawal checks and debits the current credit
 first. Total withdrawals by an address are bounded by its initial credit
 plus any credit added by settlements during recipient execution. The
 returned credit includes reentrant withdrawals and new settlement credits.
+
+Source settle: the prelude `settle` decides the claim at a stable index
+with the same legs on the source `Escrow`. Release and refund close the
+claim in the closed map. The prelude `withdraw` only takes `n` from the
+credit, because the source has no wei (SPEC section 5).
 
 ## License
 

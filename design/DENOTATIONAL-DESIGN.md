@@ -193,7 +193,8 @@ The dictionary that makes this a denotation rather than a sketch:
 | `cast` | unit of \(\mathrm{LeftKanExtension}\) | yes (orbit-constant) |
 | `amend` | \(\mathrm{Gov}\) | yes (`hom_amend`, by `rfl`) |
 | `settle` | case on \((\mathrm{Gov}\, L).\mathrm{obj}\) | yes, where \(L\) exists |
-| `credit` | packing of \(\mathrm{Address} \to A\); settle adds to it, withdraw takes from it | not an operation |
+| `credit` | a second `Ledger`, packing of \(\mathrm{Address} \to A\); settle applies `add` to it, withdraw applies `sub` to it | not an operation |
+| `closed` | the closed flag at each stable claim index (`Closed`); settle applies `close` on release and refund, the representation of \(\mathrm{claims} \mathrel{-}= c\) | not an operation |
 | `withdraw` | partial credit debit composed with recipient execution \(C_{a,n}\), identity on \(L\) | relative to the recipient context \(C_{a,n}\) in section 3 |
 | `verdict` | \((\mathrm{Gov}\, L).\mathrm{obj}\, X\) | bridge, not an operation |
 | `selfConstituting` | erased witness of \(\mathrm{IsSelfConstituting}\, F\) | proof, erased |

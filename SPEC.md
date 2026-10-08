@@ -1,7 +1,7 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M3 (chunks 1 to 3 done, chunk 4 open; section
-10). `escrow-lang` is a working name.
+Status: draft, milestone M3 (all four chunks done; section 10).
+`escrow-lang` is a working name.
 
 ## 1. Purpose
 
@@ -19,19 +19,10 @@ contract is a representation of that pair. The compiler is correct when each
 contract entry denotes the operation of design section 3. Evaluation of the
 prelude operations by the checker is the executable meaning.
 `test/differential.py` runs each ballot vector through `escrowc verdicts`
-and through the contract in geth, and compares the results.
-
-M3 chunk 4a models O4 claim closing and the O7 settlement credit legs in
-the source prelude. `Escrow` contains a deposit ledger, a credit ledger,
-append-only claims and a closed map. `settle` takes a stable claim index
-and erased proofs that it is in range, open and covered by the payer's
-ledger balance. Release subtracts the amount from that balance and adds
-it to the payee's credit; refund adds it to the payer's credit instead.
-Both close the claim, while hold preserves the state. `openAfterSettle`
-in `examples/programs/arrow-debreu.esc` proves that no claim remains open
-after release. Source `withdraw` remains pending M3 work. The differential
-test compares verdicts with the checker and storage with a Python model;
-it does not establish agreement with source settlement state.
+and through the contract in geth, and compares the results. For each
+vector, it also compares the geth storage after `settle` with `escrowc
+eval` of source `settle` on the same claim. The Python model `settled()`
+is a cross-check.
 
 ## 2. Programs
 
@@ -185,6 +176,7 @@ claim at index `c`, obtained by `claimAt (claims s) c`.
 | `cast F L x` | `EqDec (F x) (gov F L x)` | the unit at `x`; the state does not change |
 | `castOrbit F L x y e` | `EqTally (orbit x) (orbit y) -> EqDec (gov F L x) (gov F L y)` | two ballots in one orbit give one cast, by `congTD` |
 | `settle F L x c s hc ho h` | `Escrow`, with `c : Nat`, erased `hc : Lt c (claimCount (claims s))`, `ho : EqNat (closed s c) 0`, `h : Le n (balance (ledger s) p)` | `decide` on `verdict F L x`: release subtracts `n` from the ledger of `p`, adds it to the credit of `q` and closes `c`; refund adds it to the credit of `p` instead; hold gives `s` |
+| `withdraw a n s h` | `Escrow`, with erased `h : Le n (balance (credit s) a)` | `sub` of `n` from the credit of `a`; the ledger, the claims and the closed flags do not change; identity on `L`. The source has no wei, so the send and the recipient context of design section 3 are not modeled |
 | `amend Phi F L` | `ChoiceRule` | `Phi (rule F L)` |
 | `canonical` | `AmendmentRule` | `fun H x => H (orbit x)` |
 | `homAmend F L x` | `EqDec (amend canonical F L x) (gov F L x)` | `reflDec` |
@@ -203,7 +195,7 @@ only proposals are identities and `propose p ; q` is vacuous (design section
 | Regime | `Aggregation F` | Compiled contract |
 |---|---|---|
 | Arrow-impossibility | no inhabitant | `deposit` only; `cast`, `settle` and `amend` each need `L` |
-| Arrow-Debreu | one orbit rule | all four entries |
+| Arrow-Debreu | one orbit rule | all five entries, including `withdraw` |
 | Schelling-Ising | not reachable at a discrete `D` (section 4.1; USER ruling 2026-10-06) | not applicable |
 
 ## 7. What the compiler writes
@@ -387,11 +379,14 @@ facts are in `probe/CAPABILITY.md`.
   table` against `amend`. The assay toolchain, generator and probes leave
   the tree. Gates: `make`, `make check-clang`, `make test`, `python3
   test/settlement.py` and `python3 test/differential.py`.
-- M3: O4 and O7 as RULED 2026-10-07 (section 9), in four chunks. (1) O4:
-  `settle` checks the claim index and closes the claim. (2) O7: the credit
-  and `withdraw`, with `test/settlement.py` at 87 cases in geth. (3) Design
-  section 3 and the documents. Chunks 1 to 3 are done (2026-10-07 to
-  2026-10-08). They change only the EVM writer, its tests and the
-  documents. (4) Source settlement and the example programs now model
-  O4 and the O7 credit legs. Source withdrawal and a differential check
-  of source settlement state remain open (section 1).
+- M3: O4 and O7 as RULED 2026-10-07 (section 9), in four chunks. All four
+  are done (2026-10-07 to 2026-10-08). (1) O4: `settle` checks the claim
+  index and closes the claim. (2) O7: the credit and `withdraw`, with
+  `test/settlement.py` at 87 cases in geth. (3) Design section 3 and the
+  documents. Chunks 1 to 3 change only the EVM writer, its tests and the
+  documents. (4) The source prelude and the example programs model O4
+  and O7: `settle` by stable claim index with the erased premises `hc`,
+  `ho` and `h` (section 5), source `withdraw` on the credit, and
+  `test/differential.py` compares the geth storage after `settle` with
+  `escrowc eval` of source `settle`. Chunk 4 changes no EVM code. `make
+  test` gives 97 ok.
