@@ -1,6 +1,7 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M5 done (O1 CLOSED, a proof of section 4.1; section 10).
+Status: draft, milestone M5 done (O1 CLOSED, a proof of section 4.1), M6
+planned (O2, member classes; section 10).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -369,7 +370,8 @@ facts are in `probe/CAPABILITY.md`.
   three limits of the proof. The old text of O1 is in
   `git show 71d51b1:SPEC.md`.
 - O2. `act` is the symmetric group on members. The design and the DAO
-  example (a `Z2` flip on spins) keep `act` general.
+  example (a `Z2` flip on spins) keep `act` general. M6 (section 10)
+  plans member classes: the symmetric group inside each class.
 - O3. RULED 2026-10-06: `D` stays discrete and the Schelling-Ising row is
   not reachable. The DAO repository finds its fork in the indiscrete target
   `MagPhase`, not a discrete one.
@@ -525,3 +527,15 @@ facts are in `probe/CAPABILITY.md`.
   mechanism-lang commit `2049161` (section 4.1). Rung 4 (Lean 4) was not
   necessary. The failed rungs added no file to escrow-lang. Chunk 5 updates
   section 4.1, O1 and this section.
+- M6: O2, `act` on member classes (USER ruling 2026-10-09). Planned. A
+  program can put its members into classes. `act` is the product of the
+  symmetric groups on the classes, so the tally index is one count pair
+  for each class. A program with no classes has one class: the symmetric
+  group of today. Its table and compiled output do not change. `escrowc`
+  refuses a program whose table makes the runtime larger than the runtime
+  size limit (`EVM_RUNTIME_MAX`, 24576 bytes). Chunk 0 is a read-only
+  probe. The next
+  chunks change the prelude and the checker, `escrowc table`, the runtime
+  in `src/evm.c`, the tests and the documents. The proof of section 4.1
+  (M5) is for one class, and M6 does not extend it. An action on the
+  decisions (the `Z2` flip of the DAO example) is not part of M6.
