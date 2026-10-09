@@ -60,6 +60,10 @@ expect "eval memberAddresses" 0 "acons 0x100000000000000000000000000000000000000
   eval "$programs/arrow-debreu.esc" memberAddresses
 expect "check impossibility with memberAddresses" 0 "ok impossibility" \
   check "$root/test/fixtures/impossibility-addresses.esc"
+# memberClasses (M6): an Arrow-Debreu program with two member classes (a test
+# fixture) still checks.
+expect "check debreu with two member classes" 0 "ok debreu" \
+  check "$root/test/fixtures/two-classes.esc"
 
 # Erased Sigma fields may be constructed from erased variables and used
 # in types, while the second field remains available at run time.

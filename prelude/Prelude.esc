@@ -176,27 +176,100 @@ def tallyOf : Ballots -> T3 := foldBallots T3 bump (tuple (0, tuple (0, 0)))
 
 def total : T3 -> Nat := fun (t : T3) => natAdd t.0 (natAdd t.1.0 t.1.1)
 
+-- M6 member classes (R4).  `memberClasses` lists the class sizes k_1 to
+-- k_m in member order: members 1 to k_1 are class 1, and so on.  escrowc
+-- checks the program declaration `def memberClasses : Classes` just after
+-- this family, or it gives one class of `members` (`kcons members knil`).
+-- The sizes are not 0 and their sum is `members` (REFUSE_CLASS_ZERO,
+-- REFUSE_CLASS_SUM).
+mu Classes : Type 0 :=
+  | knil : Classes
+  | kcons (k : Nat) (ks : Classes) : Classes
+
+-- One count triple for each class, in class order.
+mu Tallies : Type 0 :=
+  | tnil : Tallies
+  | tcons (t : T3) (ts : Tallies) : Tallies
+
+-- `takeTally k j xs` counts the ballots at positions j to k - 1 of `xs`
+-- and returns the rest.  Built-in `Nat` has no eliminator, so `natLt`
+-- stops the walk.  `stepTally` counts one ballot into a step result.
+def stepTally : Ballot -> prod (T3, Ballots) -> prod (T3, Ballots) :=
+  fun (h : Ballot) (r : prod (T3, Ballots)) => tuple (bump h r.0, r.1)
+
+def rec takeTally : Nat -> Nat -> Ballots -> prod (T3, Ballots) :=
+  fun (k : Nat) (j : Nat) (xs : Ballots) =>
+    match xs as w in Ballots return prod (T3, Ballots) with
+    | bnil => tuple (tuple (0, tuple (0, 0)), bnil)
+    | bcons h t =>
+      (case natLt j k with
+       | 0 (u : prod ()) => tuple (tuple (0, tuple (0, 0)), bcons h t)
+       | 1 (u : prod ()) => stepTally h (takeTally k (natAdd j 1) t))
+
+-- `consTally` puts the tally of one class in front of the tallies of the
+-- rest of the ballots.
+def consTally : prod (T3, Ballots) -> (Ballots -> Tallies) -> Tallies :=
+  fun (r : prod (T3, Ballots)) (f : Ballots -> Tallies) => tcons r.0 (f r.1)
+
+-- The class tally.  The last class counts all the remaining ballots, so
+-- one class gives `tcons (tallyOf xs) tnil` and the ballot count stays in
+-- the `Config` proof.
+def rec classTallyOf : Classes -> Ballots -> Tallies := fun (ks : Classes) (xs : Ballots) =>
+  match ks as w in Classes return Tallies with
+  | knil => tnil
+  | kcons k rest =>
+    (match rest as v in Classes return Tallies with
+     | knil => tcons (tallyOf xs) tnil
+     | kcons k2 rest2 => consTally (takeTally k 0 xs) (fun (ys : Ballots) => classTallyOf rest ys))
+
+-- `totals` and `sumCounts` give `total t` and `t` at one class.
+def rec totals : Tallies -> Nat := fun (ts : Tallies) =>
+  match ts as w in Tallies return Nat with
+  | tnil => 0
+  | tcons t rest =>
+    (match rest as v in Tallies return Nat with
+     | tnil => total t
+     | tcons t2 rest2 => natAdd (total t) (totals rest))
+
+def addT3 : T3 -> T3 -> T3 := fun (a : T3) (b : T3) =>
+  tuple (natAdd a.0 b.0, tuple (natAdd a.1.0 b.1.0, natAdd a.1.1 b.1.1))
+
+def rec sumCounts : Tallies -> T3 := fun (ts : Tallies) =>
+  match ts as w in Tallies return T3 with
+  | tnil => tuple (0, tuple (0, 0))
+  | tcons t rest =>
+    (match rest as v in Tallies return T3 with
+     | tnil => t
+     | tcons t2 rest2 => addT3 t (sumCounts rest))
+
 -- `Config` and `Tally` are `mu` records, not Sigma types: the kernel does
 -- not identify `s.1` in the type of `s.2` with a written `s.1`, so
 -- `fun (s : S) => (s.1, s.2)` is refused, and there is no Sigma pattern
 -- (SPEC open item O10).  A `match` on a record binds both fields.
+-- `Config` states its proof through the class tally, so `orbit` reuses it.
 mu Config : Type 0 :=
-  | mkConfig (xs : Ballots) (e : EqNat (total (tallyOf xs)) members) : Config
+  | mkConfig (xs : Ballots) (e : EqNat (totals (classTallyOf memberClasses xs)) members) : Config
 
 mu Tally : Type 0 :=
-  | mkTally (t : T3) (e : EqNat (total t) members) : Tally
+  | mkTally (ts : Tallies) (e : EqNat (totals ts) members) : Tally
 
 def ballots : Config -> Ballots := fun (x : Config) =>
   match x as w in Config return Ballots with
   | mkConfig xs e => xs
 
+-- `counts` is the count triple over all the classes; `classCounts` keeps
+-- one triple for each class.
 def counts : Tally -> T3 := fun (t : Tally) =>
   match t as w in Tally return T3 with
+  | mkTally c e => sumCounts c
+
+def classCounts : Tally -> Tallies := fun (t : Tally) =>
+  match t as w in Tally return Tallies with
   | mkTally c e => c
 
 def orbit : Config -> Tally := fun (x : Config) =>
   match x as w in Config return Tally with
-  | mkConfig xs e => mkTally (tallyOf xs) e
+  | mkConfig xs e => mkTally (classTallyOf memberClasses xs) e
 
 mu EqTally : (0 a : Tally) -> (0 b : Tally) -> Type 0 :=
   | reflTally : (0 t : Tally) -> EqTally t t

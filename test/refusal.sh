@@ -56,6 +56,14 @@ for form in nu axiom contract storage entry payable constructor fallback error i
 done
 refuse prelude-name REFUSE_PRELUDE_NAME decide "$members" 'def decide : Nat := 0'
 refuse builtin-name REFUSE_PRELUDE_NAME natAdd "$members" 'def natAdd : Nat := 0'
+refuse classes-late REFUSE_PRELUDE_NAME memberClasses "$members" 'def x : Nat := 0' \
+  'def memberClasses : Classes := kcons 3 knil'
+refuse classes-zero REFUSE_CLASS_ZERO memberClasses "$members" \
+  'def memberClasses : Classes := kcons 0 (kcons 3 knil)'
+refuse classes-sum REFUSE_CLASS_SUM memberClasses "$members" \
+  'def memberClasses : Classes := kcons 2 (kcons 2 knil)'
+refuse classes-nil REFUSE_CLASS_SUM memberClasses "$members" 'def memberClasses : Classes := knil'
+refuse classes-type REFUSE_CLASS_SUM memberClasses "$members" 'def memberClasses : Nat := 3'
 
 refuse duplicate TYPE_DUPLICATE x "$members" 'def x : Nat := 0' 'def x : Nat := 1'
 refuse scope TYPE_SCOPE x "$members" 'def x : Nat := y'

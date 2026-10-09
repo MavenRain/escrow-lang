@@ -12,6 +12,10 @@
  *     the def memberAddresses of a program (M4, both regimes);
  *   REFUSE_ADDRESSES
  *     a Debreu program without def memberAddresses at build (M4);
+ *   REFUSE_CLASS_ZERO, REFUSE_CLASS_SUM
+ *     invalid member class sizes (M6);
+ *   REFUSE_CLASS_TABLE
+ *     a Debreu table or build with multiple member classes (M6);
  *   TYPE_SCOPE, TYPE_DUPLICATE, TYPE_MISMATCH (with both normal forms),
  *   TYPE_SHAPE, TYPE_INFER, TYPE_UNIVERSE, TYPE_ERASED, TYPE_MATCH, TYPE_MU,
  *   TYPE_REC, TYPE_NAT, TYPE_FUEL, TYPE_INTERNAL, MEMORY
@@ -34,7 +38,8 @@ EscrowRegime escrow_regime(const EscrowChecked *checked);
 unsigned escrow_members(const EscrowChecked *checked);
 
 /* Debreu: one decision code (1 release, 2 refund, 3 hold) per tally, in the
- * order of src/evm.h. Impossibility: no codes. */
+ * order of src/evm.h. Multiple classes are refused until the table and
+ * runtime support them. Impossibility: no codes. */
 int escrow_table(EscrowChecked *checked, const unsigned char **codes, size_t *count);
 /* Debreu: the addresses of def memberAddresses, one word of 32 bytes for
  * each member, in the order of src/evm.h; REFUSE_ADDRESSES without the def.

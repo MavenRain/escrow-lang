@@ -118,6 +118,8 @@ static int conv(C *c, Value *a, Value *b, int lvl);
 static Ast *quote(C *c, Value *v, int lvl);
 static Value *infer(C *c, Bind *ctx, int lvl, const Ast *t, int relevant);
 static void check(C *c, Bind *ctx, int lvl, const Ast *t, Value *want, int relevant);
+static Value *global_value(C *c, const char *name);
+static Value *ctor2(C *c, const char *ctor, Value *a, Value *b);
 
 /* ---- errors, memory, names ---- */
 
@@ -1389,6 +1391,53 @@ static int addresses_ok(C *c) {
   return !c->failed;
 }
 
+/* M6 (R4): `def memberClasses : Classes` lists the class sizes k_1 to k_m in
+ * member order.  Each size is not 0 and the sum is `members`.  Positions
+ * count from 1; 0 means no such size. */
+static int is_kcons(const Value *v) {
+  return v->kind == V_CON && same(v->global->name, "kcons") && v->nargs == 2 && v->args[0]->kind == V_NAT;
+}
+
+static void classes_ok(C *c) {
+  Global *g = find_global(c, "memberClasses");
+  Global *family = find_global(c, "Classes");
+  if (c->failed || g == NULL || family == NULL)
+    return;
+  c->def = span_of(g->name);
+  c->fuel = CHECK_FUEL;
+  Loc loc = g->decl != NULL ? g->decl->loc : c->loc;
+  const Value *v = conv(c, g->type, family->value, 0) ? g->value : &c->bad;
+  unsigned long long sum = 0;
+  size_t n = 0, zero = 0;
+  for (; is_kcons(v); v = v->args[1], n++) {
+    unsigned long long k = v->args[0]->nat;
+    zero = zero == 0 && k == 0 ? n + 1 : zero;
+    sum = sum > c->members || k > c->members ? (unsigned long long)c->members + 1 : sum + k;
+  }
+  int list = v->kind == V_CON && same(v->global->name, "knil");
+  if (list && zero != 0)
+    fail(c, "REFUSE_CLASS_ZERO", loc, "the class size at position %zu must not be 0", zero);
+  if (!c->failed && !(list && sum == c->members))
+    fail(c, "REFUSE_CLASS_SUM", loc,
+         "def memberClasses : Classes must list literal class sizes whose sum is members (%u)", c->members);
+}
+
+/* escrowc checks a program `def memberClasses` (decl 1) just after the
+ * prelude family `Classes`, or it adds one class of `members`.  Returns the
+ * first program decl that the program loop checks. */
+static size_t member_classes(C *c, const Program *program) {
+  const Decl *d = program->ndecls > 1 ? &program->decls[1] : NULL;
+  int stated = d != NULL && d->kind == DECL_DEF && same(d->name, "memberClasses");
+  if (stated)
+    check_decl(c, program, 1, 0);
+  if (!stated && !c->failed) {
+    Global *g = add_global(c, "memberClasses", G_DEF, global_value(c, "Classes"), 1);
+    g->value = ctor2(c, "kcons", mk_nat(c, c->members), global_value(c, "knil"));
+  }
+  classes_ok(c);
+  return stated ? 2 : 1;
+}
+
 static void find_regime(C *c) {
   Global *agg = find_global(c, "agg");
   Value *ty = agg != NULL && !agg->prelude ? agg->type : NULL;
@@ -1431,9 +1480,12 @@ int escrow_check(Arena *arena, const Program *prelude, const Program *program, E
   builtins(c);
   check_decl(c, program, 0, 0);
   c->members = (unsigned)program->decls[0].body->u.nat;
-  for (size_t i = 0; i < prelude->ndecls; i++)
+  size_t first = 1;
+  for (size_t i = 0; i < prelude->ndecls; i++) {
     check_decl(c, prelude, i, 1);
-  for (size_t i = 1; i < program->ndecls; i++)
+    first = same(prelude->decls[i].name, "Classes") ? member_classes(c, program) : first;
+  }
+  for (size_t i = first; i < program->ndecls; i++)
     check_decl(c, program, i, 0);
   if (!c->failed && addresses_ok(c))
     find_regime(c);
@@ -1472,7 +1524,8 @@ static int decision_code(C *c, const Value *d, const char *what) {
 static int tally_code(C *c, unsigned long long r, unsigned long long f, unsigned long long h) {
   c->fuel = CHECK_FUEL;
   Value *counts = mk_two(c, V_TUPLE, mk_nat(c, r), mk_two(c, V_TUPLE, mk_nat(c, f), mk_nat(c, h)));
-  Value *tally = ctor2(c, "mkTally", counts, refl_members(c));
+  Value *classes = ctor2(c, "tcons", counts, global_value(c, "tnil"));
+  Value *tally = ctor2(c, "mkTally", classes, refl_members(c));
   Value *rule = apply(c, apply(c, global_value(c, "rule"), c->rule->value), c->agg->value);
   return decision_code(c, apply(c, rule, tally), "rule G agg (mkTally ...)");
 }
@@ -1484,6 +1537,11 @@ int escrow_table(EscrowChecked *c, const unsigned char **codes, size_t *count) {
     return ESCROW_EXIT_REFUSED;
   if (c->regime == ESCROW_REGIME_IMPOSSIBILITY)
     return ESCROW_EXIT_OK;
+  /* The current table and runtime index only a single class tally. */
+  const Value *classes = global_value(c, "memberClasses");
+  if (is_kcons(classes) && is_kcons(classes->args[1]))
+    return refuse(c, "REFUSE_CLASS_TABLE", "memberClasses",
+                  "tables and runtime compilation currently require one member class");
   size_t n = c->members;
   if (n > TABLE_MAX)
     return refuse(c, "TABLE_LIMIT", "members", "is too large for a table");
