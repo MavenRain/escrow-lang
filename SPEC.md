@@ -1,6 +1,6 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M3 (all four chunks done; section 10).
+Status: draft, milestone M4 (ballots on chain; section 10).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -20,7 +20,8 @@ contract entry denotes the operation of design section 3. Evaluation of the
 prelude operations by the checker is the executable meaning.
 `test/differential.py` runs each ballot vector through `escrowc verdicts`
 and through the contract in geth, and compares the results. For each
-vector, it also compares the geth storage after `settle` with `escrowc
+vector, members submit their ballots through `vote`. The script compares
+the geth storage after `settle`, apart from the ballots word, with `escrowc
 eval` of source `settle` on the same claim. The Python model `settled()`
 is a cross-check.
 
@@ -39,6 +40,12 @@ larger than C's `UINT_MAX`, otherwise `REFUSE_MEMBERS`.
 It fixes the number of members. The core types `Config` and `Tally`
 (section 4) read it. `escrowc` checks `members` first, then the prelude,
 then the rest of the program.
+
+To build Arrow-Debreu, a program must declare `memberAddresses : Addresses`,
+otherwise `build` refuses with `REFUSE_ADDRESSES`. When declared, the list
+is checked in both regimes: one address per member (`REFUSE_ADDRESS_COUNT`),
+each below 2^160 (`REFUSE_ADDRESS_RANGE`), with no repeated address
+(`REFUSE_ADDRESS_REPEAT`). Arrow-impossibility may omit it.
 
 `escrowc` refuses these forms in a program: `mu` (`REFUSE_MU`), `def rec`
 (`REFUSE_REC`), and `nu`, `axiom`, `contract`, `storage`, `entry`,
@@ -207,6 +214,9 @@ line of lowercase hex with no `0x`. The writer is `src/evm.c` (interface
 for Arrow-Debreu, one decision code per tally from the checker (`escrowc
 table`; release 1, refund 2, hold 3; tallies in the order r = 0..n outer,
 f = 0..n-r inner, h = n-r-f).
+The Arrow-Debreu input also includes the checked member addresses, in
+list order. The writer embeds them in `vote` and refuses absent, repeated
+or out-of-range addresses with `EVM_ADDRESSES`.
 
 The Arrow-Debreu writer accepts 1 to 14 members (`EVM_LIMIT` outside that
 range). The Arrow-impossibility writer has no verdict table and no
@@ -218,8 +228,10 @@ range). The Arrow-impossibility writer has no verdict table and no
   are a count (slot 1) and three mappings from index to payer (slot 2),
   payee (slot 3) and amount (slot 4). Slot 5 is the credit, a mapping from
   address to the word that the address can withdraw (O7). Slot 6 maps an
-  index to its closed flag: 1 is closed and 0 is open (O4). A mapping slot
-  is keccak256 of the key word and the base slot word.
+  index to its closed flag: 1 is closed and 0 is open (O4). Slot 7 maps a
+  claim index to its ballots word: 2 bits per member, member `m` at `4^m`,
+  and 0 means no ballot (O13). A mapping slot is keccak256 of the key word
+  and the base slot word.
 - Each selector is keccak256 of the signature with `uint256` words, which
   `escrowc` computes when it writes the code. Short calldata and an unknown
   selector revert.
@@ -232,15 +244,21 @@ range). The Arrow-impossibility writer has no verdict table and no
   appends the claim. It returns the claim index.
 - `cast(b1, ..., bn)` computes the tally and returns the verdict. It writes
   nothing.
-- `settle(c, b1, ..., bn)` computes the verdict and branches to the
+- `vote(c, b)` is nonpayable. It reverts unless the caller is a member,
+  `c < claimCount`, claim `c` is open and `b` is 1, 2 or 3. It replaces
+  that member's field in the ballots word of claim `c` and returns the
+  new word. Votes on other claims and fields stay unchanged.
+- `settle(c)` reads the stored ballots, computes the verdict and branches to the
   release, refund or hold leg of design section 3. Before the branch, it
   reverts unless `c` is less than the claim count and claim `c` is open
-  (O4). Then the proof `h` becomes the guard `n <= ledger p`, including
+  (O4), and all members have voted on that claim (O13). Any caller may
+  settle. Then the proof `h` becomes the guard `n <= ledger p`, including
   hold. Release moves `n` from the ledger of `p` to the credit of `q`, and
   refund moves `n` from the ledger of `p` to the credit of `p` (O7). Each
   credit add has an overflow guard. Release and refund close claim `c`.
   Hold writes nothing, so the claim stays open and a later `settle` can
-  decide it. It returns the verdict. A failed guard reverts.
+  decide it. Stored ballots stay after every verdict. It returns the
+  verdict. A failed guard reverts.
 - `amend()` takes no argument at the canonical `Phi`. It returns the packed
   verdict table `sum C_i * 4^i` and writes nothing (O5).
 - `withdraw(n)` guards `n <= credit caller`, debits `n` from the credit of
@@ -250,9 +268,10 @@ range). The Arrow-impossibility writer has no verdict table and no
   includes both withdrawals and settlement credits made during the call. A
   recipient that reverts cannot block `settle`, because `settle` sends no
   funds.
-- `cast`, `settle`, `amend` and `withdraw` revert on a call value. At
-  Arrow-impossibility the contract has no verdict table, and `cast` and
-  `withdraw` revert: deposits stay in the contract (design section 4).
+- `cast`, `vote`, `settle`, `amend` and `withdraw` revert on a call value.
+  At Arrow-impossibility the contract has no verdict table or member
+  addresses, and only `deposit` is present: all other calls revert and
+  deposits stay in the contract (design section 4).
 - Proof terms erase. Each guard is checked and its witness is dropped.
 
 ## 8. Host and target
@@ -376,11 +395,10 @@ facts are in `probe/CAPABILITY.md`.
   `cast(b1, ..., bn)` stays the pure
   tally of design section 3. The Arrow-impossibility contract gets no
   `vote`. The prelude has no model of the votes: on chain, the `Config` of
-  source `settle` is the stored ballots. Before the ruling, and until M4
-  builds it, `cast` and `settle` read the ballots from calldata (section
-  7) and the contract has no member addresses. Thus any caller of `settle`
-  picks the verdict, for example a payee that sends `n` release ballots.
-  M4 builds the ruling (section 10).
+  source `settle` is the stored ballots. Before M4, `cast` and `settle`
+  read the ballots from calldata and the contract had no member addresses.
+  Thus any caller of `settle` could pick the verdict, for example a payee
+  sending `n` release ballots. M4 implements the ruling (section 10).
 
 
 ## 10. Milestones
@@ -413,9 +431,13 @@ facts are in `probe/CAPABILITY.md`.
   `test/differential.py` compares the geth storage after `settle` with
   `escrowc eval` of source `settle`. Chunk 4 changes no EVM code. `make
   test` gives 97 ok.
-- M4: O13 as RULED 2026-10-08 (section 9), ballots on chain. M4 is ruled
-  and not built. Section 7 shows the M3 contract until M4 builds the
-  ruling. The three refusal mutants `test/mutants/debreu-first.esc`,
+- M4 (2026-10-08): O13 as RULED (section 9), ballots on chain. The
+  checker validates `memberAddresses`; the build requires them for
+  Arrow-Debreu. The EVM writer embeds them, adds `vote` and makes `settle`
+  read the ballots of its claim. `test/settlement.py` runs 131 cases in
+  geth, including 1 and 14 members. `test/differential.py` submits actual
+  member votes and compares all 27 default vectors against source `settle`.
+  The three refusal mutants `test/mutants/debreu-first.esc`,
   `impossibility-agg-release.esc` and `impossibility-agg-refl.esc` (a
   constitution or `mkAgg` built on the rule `first`) come with the ruling,
   so `make test` gives 100 ok.

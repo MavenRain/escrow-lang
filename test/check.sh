@@ -79,6 +79,7 @@ expect "erased Sigma construction and type projection" 0 "ok impossibility" chec
 for annotation in 'Aggregation F' AggF 'AggType F'; do
   cat > "$out/aggregation-alias.esc" <<EOF
 def members : Nat := 1
+def memberAddresses : Addresses := acons 0x1000000000000000000000000000000000000001 anil
 def F : ChoiceRule := fun (x : Config) => release
 def AggF : Type 0 := Aggregation F
 def AggType : (0 F : ChoiceRule) -> Type 0 := Aggregation

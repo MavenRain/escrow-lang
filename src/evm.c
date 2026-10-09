@@ -4,13 +4,15 @@
  * Storage: ledger (slot 0, address -> word), claimCount (slot 1), payer,
  * payee and amount (slots 2, 3 and 4, index -> word), credit (slot 5,
  * address -> word, the withdrawable funds of SPEC O7) and closed (slot 6,
- * index -> word, 1 = closed, SPEC O4). A mapping entry lives at
- * keccak256(key . slot), as in Solidity.
+ * index -> word, 1 = closed, SPEC O4) and ballots (slot 7, index -> word,
+ * M4 R3: the ballot of member m is the field of 2 bits at 4^m, 0 = no
+ * ballot). A mapping entry lives at keccak256(key . slot), as in Solidity.
  *
  * Arrow-Debreu: the orbit rule is a byte table at the end of the runtime
  * code, read with CODECOPY, so no entry can write it. Ballot codes 1, 2
  * and 3 weigh 1, members + 1 and 0, and the sum of the weights,
- * r + (members + 1) f, indexes the table of decision codes.
+ * r + (members + 1) f, indexes the table of decision codes. The member
+ * addresses are PUSH20 constants of the vote entry (M4 R2).
  *
  * Every failure is REVERT with empty output: a short calldata, an unknown
  * selector, a call value sent to an entry that is not payable, a failed
@@ -31,7 +33,7 @@ enum {
 
 enum {
   SLOT_LEDGER = 0, SLOT_COUNT = 1, SLOT_PAYER = 2, SLOT_PAYEE = 3, SLOT_AMOUNT = 4,
-  SLOT_CREDIT = 5, SLOT_CLOSED = 6
+  SLOT_CREDIT = 5, SLOT_CLOSED = 6, SLOT_BALLOTS = 7
 };
 
 /* Memory: 0x00 to 0x3f is scratch for keccak256 and the table read. */
@@ -39,17 +41,18 @@ enum { MEM_DECISION = 0x80, MEM_PAYER = 0xa0, MEM_AMOUNT = 0xc0, MEM_BALANCE = 0
 
 typedef enum {
   OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_LT = 0x10, OP_GT = 0x11,
-  OP_EQ = 0x14, OP_ISZERO = 0x15, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLER = 0x33,
+  OP_EQ = 0x14, OP_ISZERO = 0x15, OP_AND = 0x16, OP_OR = 0x17, OP_NOT = 0x19,
+  OP_SHL = 0x1b, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLER = 0x33,
   OP_CALLVALUE = 0x34, OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36,
   OP_CODECOPY = 0x39, OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52,
   OP_SLOAD = 0x54, OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_GAS = 0x5a,
   OP_JUMPDEST = 0x5b, OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61,
-  OP_PUSH4 = 0x63, OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91,
-  OP_CALL = 0xf1, OP_RETURN = 0xf3, OP_REVERT = 0xfd
+  OP_PUSH4 = 0x63, OP_PUSH20 = 0x73, OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_DUP4 = 0x83,
+  OP_SWAP1 = 0x90, OP_SWAP2 = 0x91, OP_CALL = 0xf1, OP_RETURN = 0xf3, OP_REVERT = 0xfd
 } Op;
 
 typedef enum {
-  LABEL_REVERT, LABEL_DEPOSIT, LABEL_CAST, LABEL_SETTLE, LABEL_AMEND,
+  LABEL_REVERT, LABEL_DEPOSIT, LABEL_CAST, LABEL_SETTLE, LABEL_VOTE, LABEL_AMEND,
   LABEL_WITHDRAW, LABEL_RELEASE, LABEL_REFUND, LABEL_DONE, LABEL_TABLE,
   LABEL_RUNTIME, LABEL_COUNT
 } Label;
@@ -307,6 +310,20 @@ static void deposit(Asm *a) {
   return_top(a);
 }
 
+/* sum -> the decision code at byte sum of the table. */
+static void table_code(Asm *a) {
+  push_label(a, LABEL_TABLE);
+  op(a, OP_ADD);
+  push(a, 0x20);
+  op(a, OP_SWAP1);
+  op(a, OP_PUSH0);
+  op(a, OP_CODECOPY);
+  op(a, OP_PUSH0);
+  op(a, OP_MLOAD);
+  push(a, 0xf8);
+  op(a, OP_SHR);
+}
+
 /* The decision code of the ballots in calldata words first .. first + n - 1.
  * Each ballot must be 1, 2 or 3. */
 static void tally(Asm *a, unsigned first, unsigned members) {
@@ -331,16 +348,36 @@ static void tally(Asm *a, unsigned first, unsigned members) {
     op(a, OP_ADD);
     op(a, OP_ADD);
   }
-  push_label(a, LABEL_TABLE);
-  op(a, OP_ADD);
-  push(a, 0x20);
+  table_code(a);
+}
+
+/* word -> the decision code of the ballots in the fields of word (M4 R5).
+ * Reverts when a field is 0 (a member has no ballot). */
+static void stored_tally(Asm *a, unsigned members) {
+  op(a, OP_PUSH0);
+  for (unsigned m = 0; m < members; m++) {
+    op(a, OP_DUP2);
+    push(a, 2ul * m);
+    op(a, OP_SHR);
+    push(a, 3);
+    op(a, OP_AND);
+    op(a, OP_DUP1);
+    op(a, OP_ISZERO);
+    revert_if(a);
+    op(a, OP_DUP1);
+    push(a, 1);
+    op(a, OP_EQ);
+    op(a, OP_SWAP1);
+    push(a, 2);
+    op(a, OP_EQ);
+    push(a, members + 1ul);
+    op(a, OP_MUL);
+    op(a, OP_ADD);
+    op(a, OP_ADD);
+  }
+  table_code(a);
   op(a, OP_SWAP1);
-  op(a, OP_PUSH0);
-  op(a, OP_CODECOPY);
-  op(a, OP_PUSH0);
-  op(a, OP_MLOAD);
-  push(a, 0xf8);
-  op(a, OP_SHR);
+  op(a, OP_POP);
 }
 
 /* cast x: the decision of the ballots. It writes nothing. */
@@ -406,17 +443,77 @@ static void close_claim(Asm *a) {
   op(a, OP_SSTORE);
 }
 
-/* settle c x: guard c < claimCount and claim c open, guard amount c <=
- * balance (payer c) (the proof h), then the release, refund or hold leg
+/* A member address: PUSH20 of bytes 12 to 31 of its word. */
+static void push_address(Asm *a, const unsigned char *word) {
+  op(a, OP_PUSH20);
+  for (size_t i = 12; i < 32; i++)
+    put(a, word[i]);
+}
+
+/* vote c b (M4 R2 and R4): guard that CALLER is a member m, claim c is
+ * open and b is 1, 2 or 3, then write b into the field at 4^m of the
+ * ballots word of claim c. Returns the new word. */
+static void vote(Asm *a, unsigned members, const unsigned char *addresses) {
+  entry(a, LABEL_VOTE, 2, ENTRY_NONPAYABLE);
+  /* k = 2 m + 1 for member m, 0 for any other caller. */
+  op(a, OP_PUSH0);
+  for (unsigned m = 0; m < members; m++) {
+    op(a, OP_CALLER);
+    push_address(a, addresses + 32ul * m);
+    op(a, OP_EQ);
+    push(a, 2ul * m + 1);
+    op(a, OP_MUL);
+    op(a, OP_ADD);
+  }
+  op(a, OP_DUP1);
+  op(a, OP_ISZERO);
+  revert_if(a);
+  push(a, 1);
+  op(a, OP_SWAP1);
+  op(a, OP_SUB);
+  open_guard(a);
+  argument(a, 1);
+  push(a, 1);
+  op(a, OP_SWAP1);
+  op(a, OP_SUB);
+  push(a, 2);
+  op(a, OP_LT);
+  revert_if(a);
+  /* shift -> word & ~(3 << shift) | b << shift at the slot of claim c. */
+  argument(a, 0);
+  slot(a, SLOT_BALLOTS);
+  op(a, OP_DUP1);
+  op(a, OP_SLOAD);
+  push(a, 3);
+  op(a, OP_DUP4);
+  op(a, OP_SHL);
+  op(a, OP_NOT);
+  op(a, OP_AND);
+  argument(a, 1);
+  op(a, OP_DUP4);
+  op(a, OP_SHL);
+  op(a, OP_OR);
+  op(a, OP_DUP1);
+  op(a, OP_SWAP2);
+  op(a, OP_SSTORE);
+  return_top(a);
+}
+
+/* settle c (M4 R5): guard c < claimCount and claim c open, read the
+ * ballots of claim c from slot 7 (all n must be present), guard amount c
+ * <= balance (payer c) (the proof h), then the release, refund or hold leg
  * of design section 3 by the decision. Release moves the amount from the
  * ledger of the payer to the credit of the payee, refund to the credit of
  * the payer (SPEC O7). Release and refund close claim c, hold leaves it
- * open. */
+ * open and the ballots stay. Any caller can settle. */
 static void settle(Asm *a, unsigned members) {
-  entry(a, LABEL_SETTLE, members + 1, ENTRY_NONPAYABLE);
-  tally(a, 1, members);
-  store(a, MEM_DECISION);
+  entry(a, LABEL_SETTLE, 1, ENTRY_NONPAYABLE);
   open_guard(a);
+  argument(a, 0);
+  slot(a, SLOT_BALLOTS);
+  op(a, OP_SLOAD);
+  stored_tally(a, members);
+  store(a, MEM_DECISION);
   argument(a, 0);
   slot(a, SLOT_PAYER);
   op(a, OP_SLOAD);
@@ -519,12 +616,14 @@ static void runtime_debreu(Asm *a, const EscrowContract *contract) {
   dispatch_head(a);
   dispatch(a, "deposit", 3, LABEL_DEPOSIT);
   dispatch(a, "cast", n, LABEL_CAST);
-  dispatch(a, "settle", n + 1, LABEL_SETTLE);
+  dispatch(a, "settle", 1, LABEL_SETTLE);
+  dispatch(a, "vote", 2, LABEL_VOTE);
   dispatch(a, "amend", 0, LABEL_AMEND);
   dispatch(a, "withdraw", 1, LABEL_WITHDRAW);
   revert_block(a);
   deposit(a);
   cast(a, n);
+  vote(a, n, contract->addresses);
   settle(a, n);
   amend(a, packed);
   withdraw(a);
@@ -555,6 +654,17 @@ static int check_debreu(const EscrowContract *contract, FILE *err) {
     unsigned code = contract->codes[i];
     if (code < 1 || code > 3)
       return fail(err, "EVM_TABLE", "decision code %zu is %u, need 1, 2 or 3", i, code);
+  }
+  if (contract->addresses == NULL)
+    return fail(err, "EVM_ADDRESSES", "the Debreu regime needs %u member addresses, got none", n);
+  for (unsigned m = 0; m < n; m++) {
+    const unsigned char *word = contract->addresses + 32ul * m;
+    for (size_t i = 0; i < 12; i++)
+      if (word[i] != 0)
+        return fail(err, "EVM_ADDRESSES", "the address at position %u must be below 2^160", m + 1);
+    for (unsigned k = 0; k < m; k++)
+      if (memcmp(word, contract->addresses + 32ul * k, 32) == 0)
+        return fail(err, "EVM_ADDRESSES", "the address at position %u occurs earlier in the list", m + 1);
   }
   return 0;
 }

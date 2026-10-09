@@ -54,17 +54,23 @@ error is one line on stderr, `escrowc: CODE: DEF: message` (SPEC section 2).
 ## Contract
 
 `escrowc build` writes one contract (SPEC section 7). An Arrow-Debreu
-contract has these entries:
+build requires `def memberAddresses : Addresses`, with one distinct address
+below 2^160 per member. The addresses are embedded in the runtime code.
+The contract has these entries:
 
 - `deposit(p, q, n)`: payable. It adds `n` to the ledger of `p` and
   appends the claim `(p, q, n)`. It returns the claim index.
 - `cast(b1, ..., bn)`: it returns the verdict of the ballots (1 release,
   2 refund, 3 hold) and writes nothing.
-- `settle(c, b1, ..., bn)`: it decides the open claim `c` with the
-  verdict. Release moves `n` from the ledger of `p` to the credit of `q`.
+- `vote(c, b)`: a member records ballot `b` (1, 2 or 3) on open claim `c`.
+  A new vote replaces that member's previous ballot. It returns the packed
+  ballots word. A caller outside `memberAddresses` is refused.
+- `settle(c)`: any caller can settle the open claim `c` once every member
+  has voted. It reads the stored ballots and returns their verdict.
+  Release moves `n` from the ledger of `p` to the credit of `q`.
   Refund moves `n` from the ledger of `p` to the credit of `p`. Release
   and refund close the claim. Hold writes nothing, and the claim stays
-  open.
+  open. The stored ballots stay after every verdict.
 - `amend()`: it returns the packed verdict table and writes nothing.
 - `withdraw(n)`: it debits `n` from the credit of the caller, then sends
   `n` wei to the caller. It returns the credit that remains after the
@@ -86,6 +92,7 @@ slot word):
 | 4 | claim amount: index to word |
 | 5 | credit: address to the word that the address can withdraw |
 | 6 | closed flag: index to word, 1 closed and 0 open |
+| 7 | ballots: claim index to packed word, member `m` at `4^m`, 0 means no vote |
 
 Pull payments: `settle` sends no funds. The payee of a release or the
 payer of a refund calls `withdraw` to get the funds. Thus a recipient

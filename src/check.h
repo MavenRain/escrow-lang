@@ -10,6 +10,8 @@
  *     the refusal list of SPEC section 2;
  *   REFUSE_ADDRESS_COUNT, REFUSE_ADDRESS_RANGE, REFUSE_ADDRESS_REPEAT
  *     the def memberAddresses of a program (M4, both regimes);
+ *   REFUSE_ADDRESSES
+ *     a Debreu program without def memberAddresses at build (M4);
  *   TYPE_SCOPE, TYPE_DUPLICATE, TYPE_MISMATCH (with both normal forms),
  *   TYPE_SHAPE, TYPE_INFER, TYPE_UNIVERSE, TYPE_ERASED, TYPE_MATCH, TYPE_MU,
  *   TYPE_REC, TYPE_NAT, TYPE_FUEL, TYPE_INTERNAL, MEMORY
@@ -34,6 +36,10 @@ unsigned escrow_members(const EscrowChecked *checked);
 /* Debreu: one decision code (1 release, 2 refund, 3 hold) per tally, in the
  * order of src/evm.h. Impossibility: no codes. */
 int escrow_table(EscrowChecked *checked, const unsigned char **codes, size_t *count);
+/* Debreu: the addresses of def memberAddresses, one word of 32 bytes for
+ * each member, in the order of src/evm.h; REFUSE_ADDRESSES without the def.
+ * Impossibility: NULL (the build writes nothing for them). */
+int escrow_addresses(EscrowChecked *checked, const unsigned char **addresses);
 /* One digit per ballot vector of the ChoiceRule NAME, in the product order
  * of test/differential.py, then a newline. */
 int escrow_verdicts(EscrowChecked *checked, const char *name, FILE *out);

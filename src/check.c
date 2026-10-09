@@ -1500,6 +1500,28 @@ int escrow_table(EscrowChecked *c, const unsigned char **codes, size_t *count) {
   return c->failed ? ESCROW_EXIT_REFUSED : ESCROW_EXIT_OK;
 }
 
+int escrow_addresses(EscrowChecked *c, const unsigned char **addresses) {
+  *addresses = NULL;
+  if (c->failed)
+    return ESCROW_EXIT_REFUSED;
+  if (c->regime == ESCROW_REGIME_IMPOSSIBILITY)
+    return ESCROW_EXIT_OK;
+  Global *g = find_global(c, "memberAddresses");
+  if (g == NULL || g->prelude)
+    return refuse(c, "REFUSE_ADDRESSES", "memberAddresses",
+                  "must list one EvmAddress for each member to build the Debreu contract");
+  unsigned char *out = arena_alloc(c->arena, (size_t)c->members * 32);
+  if (out == NULL)
+    return refuse(c, "MEMORY", "memberAddresses", "does not fit in the arena");
+  size_t k = 0;
+  for (const Value *v = g->value; k < c->members && is_acons(v); v = v->args[1], k++)
+    memcpy(out + 32 * k, v->args[0]->addr, 32);
+  if (k != c->members)
+    return refuse(c, "TYPE_INTERNAL", "memberAddresses", "has no normal form of acons cells");
+  *addresses = out;
+  return ESCROW_EXIT_OK;
+}
+
 static int vector_code(C *c, const Global *g, size_t k) {
   static const char *const ballots[3] = {"release", "refund", "hold"};
   c->fuel = CHECK_FUEL;

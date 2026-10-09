@@ -1,20 +1,36 @@
 /* Test driver of the EVM back end, run with:
- *   tcc src/evm.c src/keccak.c -run test/evmtool.c creation|runtime N debreu CODE...
+ *   tcc src/evm.c src/keccak.c -run test/evmtool.c creation|runtime N debreu CODE... [ADDRESS...]
  *   tcc src/evm.c src/keccak.c -run test/evmtool.c creation|runtime N impossibility [CODE...]
  *   tcc src/evm.c src/keccak.c -run test/evmtool.c keccak TEXT
  * Codes go to escrow_evm_write unchecked (0 to 255), so the tests reach its
- * EVM_TABLE refusals. Exit 0 ok, 1 refused by the back end, 2 usage. */
+ * EVM_TABLE refusals. An ADDRESS is 0x and 1 to 64 hex digits, unchecked
+ * so the tests reach EVM_ADDRESSES refusals. The
+ * addresses come after the codes, none or N of them (M4). Exit 0 ok, 1
+ * refused by the back end, 2 usage. */
 #include "../src/evm.h"
 #include "../src/keccak.h"
 #include <stdlib.h>
 #include <string.h>
 
-enum { TOOL_CODES = 512, TOOL_DIGITS = 9 };
+enum { TOOL_CODES = 512, TOOL_DIGITS = 9, TOOL_MEMBERS = 64 };
 
 static int usage(void) {
-  fputs("usage: evmtool creation|runtime N debreu CODE... | evmtool creation|runtime N impossibility [CODE...]"
-        " | evmtool keccak TEXT\n", stderr);
+  fputs("usage: evmtool creation|runtime N debreu CODE... [ADDRESS...] | evmtool creation|runtime N impossibility"
+        " [CODE...] | evmtool keccak TEXT\n", stderr);
   return 2;
+}
+
+/* 0x and 1 to 64 hex digits into a word of 32 bytes, big-endian. */
+static int address(const char *text, unsigned char word[32]) {
+  size_t size = strlen(text);
+  int ok = size >= 3 && size <= 66 && strncmp(text, "0x", 2) == 0 &&
+           strspn(text + 2, "0123456789abcdefABCDEF") == size - 2;
+  memset(word, 0, 32);
+  for (size_t i = 0; ok && i < size - 2; i++) {
+    char digit[2] = {text[size - 1 - i], '\0'};
+    word[31 - i / 2] |= (unsigned char)(strtoul(digit, NULL, 16) << (4 * (i % 2)));
+  }
+  return ok;
 }
 
 /* A decimal number of at most TOOL_DIGITS digits, or -1. */
@@ -54,14 +70,22 @@ int main(int argc, char **argv) {
   if (members < 0)
     return usage();
   unsigned char codes[TOOL_CODES];
-  size_t count = (size_t)(argc - 4);
-  for (size_t i = 0; i < count; i++) {
-    long code = number(argv[4 + i]);
+  size_t count = 0;
+  while (count < (size_t)(argc - 4) && strncmp(argv[4 + count], "0x", 2) != 0) {
+    long code = number(argv[4 + count]);
     if (code < 0 || code > 255)
       return usage();
-    codes[i] = (unsigned char)code;
+    codes[count] = (unsigned char)code;
+    count++;
   }
+  static unsigned char words[TOOL_MEMBERS * 32];
+  size_t given = (size_t)(argc - 4) - count;
+  if (given != 0 && (given != (size_t)members || given > TOOL_MEMBERS))
+    return usage();
+  for (size_t i = 0; i < given; i++)
+    if (!address(argv[4 + count + i], words + 32 * i))
+      return usage();
   int listed = regime == ESCROW_REGIME_DEBREU || count > 0;
-  EscrowContract contract = { (unsigned)members, regime, listed ? codes : NULL, count };
+  EscrowContract contract = { (unsigned)members, regime, listed ? codes : NULL, count, given > 0 ? words : NULL };
   return escrow_evm_write(&contract, part, stdout, stderr) == 0 ? 0 : 1;
 }

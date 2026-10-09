@@ -5,7 +5,8 @@ The checker side is `escrowc verdicts PROG F`: one digit per ballot vector,
 in the order of itertools.product over the codes 1, 2 and 3, with the first
 ballot outermost. The contract side deploys the creation code of `escrowc
 build` in geth evm, then runs `amend`, and `cast` and `settle` on each
-ballot vector. Each `cast` and `settle` result must equal the checker digit,
+ballot vector, after its members submit that vector through `vote`.
+Each `cast` and `settle` result must equal the checker digit,
 and `amend` must return the packed `escrowc table` codes. No verdict comes
 from Python. The storage side is source `settle`: for each ballot vector,
 the script writes a temp program, which is PROG, the vector `Config` and
@@ -64,6 +65,13 @@ def table(program, size):
     S.require(len(codes) == (size + 1) * (size + 2) // 2 and set(codes) <= set(CODES),
               f'table has {len(codes)} codes, not one code in 1..3 per tally')
     return codes
+
+
+def member_addresses(program, size):
+    normal = escrowc('eval', program, 'memberAddresses')
+    addresses = tuple(f'{int(word, 16):040x}' for word in re.findall(r'0x[0-9a-fA-F]+', normal))
+    S.require(len(addresses) == size, f'memberAddresses has {len(addresses)} addresses, need {size}')
+    return addresses
 
 
 def checker_verdicts(program, vectors):
@@ -156,6 +164,7 @@ def main():
     WORK.mkdir(parents=True, exist_ok=True)
     S.WORK = WORK
     size = members(program)
+    addresses = member_addresses(program, size)
     text = program.read_text()
     vectors = tuple(itertools.product(CODES, repeat=size))
     codes = table(program, size)
@@ -166,8 +175,11 @@ def main():
     for index, (vector, code) in enumerate(verdicts.items()):
         S.expect(f'differential-cast-{index}', runtime, S.data('cast', *vector), {}, {}, code)
         after = source_settled(text, size, index, vector)
-        S.expect(f'differential-settle-{index}', runtime, S.data('settle', 0, *vector),
-                 claim(), after, code)
+        votes = [(member, S.data('vote', 0, ballot), S.pack(vector[:m + 1]))
+                 for m, (member, ballot) in enumerate(zip(addresses, vector))]
+        S.chain(f'differential-settle-{index}', runtime,
+                votes + [(S.SENDER, S.data('settle', 0), code)],
+                claim(), S.voted(after, 0, vector))
         S.require(after == settled(code),
                   f'differential-model-{index}: source {after} != model {settled(code)}')
     print(f'DIFFERENTIAL vectors={len(vectors)} '

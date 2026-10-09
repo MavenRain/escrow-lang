@@ -22,7 +22,12 @@ GENESIS = dict(config=CONFIG, coinbase='0x' + '00' * 20, difficulty='0x0', gasLi
                nonce='0x0000000000000000', timestamp='0x0', number='0x0',
                excessBlobGas='0x0', blobGasUsed='0x0')
 CODES = (3, 3, 2, 2, 3, 3, 2, 1, 1, 1)
-LEDGER, COUNT, PAYER, PAYEE, AMOUNT, CREDIT, CLOSED = range(7)
+LEDGER, COUNT, PAYER, PAYEE, AMOUNT, CREDIT, CLOSED, BALLOTS = range(8)
+# M4: the members of the n = 3 build are the addresses of the private keys
+# 1, 2 and 3 (SENDER is member 0). The address of key 4 is not a member.
+MEMBERS = (SENDER, '2b5ad5c4795c026514f8317c7a215e218dccd6cf',
+           '6813eb9362372eef6200f3b1dbc3f819671cba69')
+OUTSIDER = '1eff47bc3a10a45d4b230b5d10e37751fe6aa718'
 FUNDS = 10**24
 REVERTING = '60006000fd'
 
@@ -84,16 +89,19 @@ def wei(text):
     return int(text, 16) if str(text).startswith('0x') else int(text)
 
 
-def run(name, code, calldata, *, before=None, value=0, create=False, balance=0, sender=None):
-    # balance: the prestate wei of the contract; sender: runtime hex code for SENDER.
+def run(name, code, calldata, *, before=None, value=0, create=False, balance=0, sender=None,
+        caller=SENDER):
+    # balance: the prestate wei of the contract; sender: runtime hex code for SENDER;
+    # caller: the address that sends the call (M4: a member votes).
     state = dict(GENESIS, alloc={
         SENDER: dict(balance=hex(FUNDS), **({} if sender is None else {'code': '0x' + sender})),
+        **({} if caller == SENDER else {caller: dict(balance=hex(FUNDS))}),
         RECEIVER: dict(balance=hex(balance), storage={f'0x{k:064x}': f'0x{v:064x}'
                                                       for k, v in (before or {}).items() if v})})
     genesis = WORK / (name + '-prestate.json')
     genesis.write_text(json.dumps(state))
     argv = ['evm', '--verbosity', '0', 'run', '--prestate', str(genesis), '--gas', str(GAS),
-            '--sender', '0x' + SENDER, '--receiver', '0x' + RECEIVER, '--code', code,
+            '--sender', '0x' + caller, '--receiver', '0x' + RECEIVER, '--code', code,
             '--input', calldata, '--value', str(value), '--json', '--dump']
     text = checked(argv + (['--create'] if create else []))
     (WORK / (name + '.out')).write_text(text)
@@ -113,8 +121,9 @@ def run(name, code, calldata, *, before=None, value=0, create=False, balance=0, 
 
 
 def expect(name, code, calldata, before, after, result, *, value=0, balance=0, sender=None,
-           balances=None):
-    actual = run(name, code, calldata, before=before, value=value, balance=balance, sender=sender)
+           balances=None, caller=SENDER):
+    actual = run(name, code, calldata, before=before, value=value, balance=balance, sender=sender,
+                 caller=caller)
     wanted = dict(status='revert' if result is None else 'success',
                   output='' if result is None else f'{result:064x}',
                   storage={k: v for k, v in after.items() if v})
@@ -122,6 +131,35 @@ def expect(name, code, calldata, before, after, result, *, value=0, balance=0, s
     require(got == wanted, f'{name}: EVM {got} != {wanted}')
     paid = {key: actual['balances'].get(key, 0) for key in (balances or {})}
     require(paid == (balances or {}), f'{name}: balances {paid} != {balances}')
+
+
+def chain(name, code, steps, before, after):
+    # M4: each step is (caller, calldata, result). The storage dump of a step
+    # is the prestate of the next step; after is the storage at the end.
+    storage = before
+    for index, (caller, calldata, result) in enumerate(steps):
+        actual = run(f'{name}-{index}', code, calldata, before=storage, caller=caller)
+        wanted = ('revert', '') if result is None else ('success', f'{result:064x}')
+        require((actual['status'], actual['output']) == wanted,
+                f'{name} step {index}: EVM {actual["status"]} {actual["output"]} != {wanted}')
+        storage = actual['storage']
+    require(storage == {k: v for k, v in after.items() if v}, f'{name}: storage {storage} != {after}')
+
+
+def pack(values):
+    # 2 bits for each value, value i at 4^i (amend, and the slot 7 ballots word of M4 R3).
+    return sum(value * 4**index for index, value in enumerate(values))
+
+
+def voted(state, claim, ballots):
+    return {**state, slot(BALLOTS, claim): pack(ballots)}
+
+
+def addresses(members):
+    # The member addresses of an n-member Debreu build (evmtool takes them after the codes).
+    chosen = (MEMBERS if members == len(MEMBERS) else
+              tuple(f'{m + 1:02x}' * 20 for m in range(members)))
+    return ['0x' + address for address in chosen]
 
 
 def tally_index(members, release, refund):
@@ -148,7 +186,11 @@ def refusals():
             (('runtime', 3, 'debreu', *CODES[:-1]), 'EVM_TABLE'),
             (('runtime', 3, 'debreu', *CODES[:-1], 4), 'EVM_TABLE'),
             (('creation', 3, 'debreu', 0, *CODES[1:]), 'EVM_TABLE'),
-            (('runtime', 3, 'impossibility', 1), 'EVM_TABLE')]
+            (('runtime', 3, 'impossibility', 1), 'EVM_TABLE'),
+            (('runtime', 3, 'debreu', *CODES), 'EVM_ADDRESSES'),
+            (('creation', 3, 'debreu', *CODES, *(['0x' + SENDER] * 3)), 'EVM_ADDRESSES'),
+            (('runtime', 3, 'debreu', *CODES, '0x1' + '00' * 20,
+              *addresses(3)[1:]), 'EVM_ADDRESSES')]
     for args, code in rows:
         result = tool(*args)
         require(result.returncode == 1 and result.stdout == '' and
@@ -171,7 +213,8 @@ def debreu_cases(runtime):
                 # SPEC O7: release credits the payee, refund credits the payer.
                 before = {COUNT: 1, slot(PAYER, 0): payer, slot(PAYEE, 0): payee,
                           slot(AMOUNT, 0): 5, slot(LEDGER, payee): 10, slot(LEDGER, payer): balance,
-                          slot(CREDIT, payer): 1, slot(CREDIT, payee): 7}
+                          slot(CREDIT, payer): 1, slot(CREDIT, payee): 7,
+                          slot(BALLOTS, 0): pack(ballots)}
                 after = dict(before)
                 result = None
                 if balance >= 5:
@@ -181,14 +224,16 @@ def debreu_cases(runtime):
                     after[slot(CREDIT, payer)] += 5 if decision == 2 else 0
                     after[slot(CLOSED, 0)] = 1 if decision in (1, 2) else 0
                 expect(f'settle-{decision}-{same}-{balance}', runtime,
-                       data('settle', 0, *ballots), before, after, result)
+                       data('settle', 0), before, after, result)
                 cases += 1
     before = {COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34, slot(AMOUNT, 0): 5,
               slot(LEDGER, 17): 20, slot(CREDIT, 17): 2**256 - 1, slot(CREDIT, 34): 2**256 - 1}
     for name, ballots in (('release', (1, 1, 3)), ('refund', (2, 2, 3))):
-        expect(f'credit-overflow-{name}', runtime, data('settle', 0, *ballots), before, before, None)
+        stored = voted(before, 0, ballots)
+        expect(f'credit-overflow-{name}', runtime, data('settle', 0), stored, stored, None)
+    # M4 R2: vote c b refuses a ballot outside 1..3 (member 0 is SENDER).
     for ballot in (0, 4):
-        expect(f'bad-ballot-{ballot}', runtime, data('settle', 0, ballot, 1, 3), before, before, None)
+        expect(f'bad-ballot-{ballot}', runtime, data('vote', 0, ballot), before, before, None)
     return cases + 4
 
 
@@ -201,23 +246,27 @@ def closing_cases(runtime):
     rows = [('bound-count', 1, claim), ('bound-max', 2**256 - 1, claim),
             ('bound-empty', 0, {slot(LEDGER, 17): 20})]
     for label, index, before in rows:
-        expect(f'settle-{label}', runtime, data('settle', index, *release), before, before, None)
+        stored = voted(before, index, release)
+        expect(f'settle-{label}', runtime, data('settle', index), stored, stored, None)
     released = {**claim, slot(LEDGER, 17): 15, slot(CREDIT, 34): 5, slot(CLOSED, 0): 1}
     refunded = {**claim, slot(LEDGER, 17): 15, slot(CREDIT, 17): 5, slot(CLOSED, 0): 1}
-    expect('hold-open', runtime, data('settle', 0, *hold), claim, claim, 3)
-    expect('hold-then-release', runtime, data('settle', 0, *release), claim, released, 1)
-    expect('close-refund', runtime, data('settle', 0, *refund), claim, refunded, 2)
+    # M4 R5: settle c reads the ballots from slot 7 and writes none, so they stay.
+    expect('hold-open', runtime, data('settle', 0), voted(claim, 0, hold), voted(claim, 0, hold), 3)
+    expect('hold-then-release', runtime, data('settle', 0), voted(claim, 0, release),
+           voted(released, 0, release), 1)
+    expect('close-refund', runtime, data('settle', 0), voted(claim, 0, refund),
+           voted(refunded, 0, refund), 2)
     again = 0
     for label, closed in (('release', released), ('refund', refunded)):
         for name, ballots in (('release', release), ('refund', refund), ('hold', hold)):
-            expect(f'settle-after-{label}-{name}', runtime, data('settle', 0, *ballots),
-                   closed, closed, None)
+            stored = voted(closed, 0, ballots)
+            expect(f'settle-after-{label}-{name}', runtime, data('settle', 0), stored, stored, None)
             again += 1
     two = {**claim, COUNT: 2, slot(PAYER, 1): 34, slot(PAYEE, 1): 17, slot(AMOUNT, 1): 3}
-    first = {**two, slot(LEDGER, 34): 7, slot(CREDIT, 17): 3, slot(CLOSED, 1): 1}
-    both = {**first, slot(LEDGER, 17): 15, slot(CREDIT, 34): 5, slot(CLOSED, 0): 1}
-    expect('close-index-1', runtime, data('settle', 1, *release), two, first, 1)
-    expect('open-index-0', runtime, data('settle', 0, *release), first, both, 1)
+    first = voted({**two, slot(LEDGER, 34): 7, slot(CREDIT, 17): 3, slot(CLOSED, 1): 1}, 1, release)
+    both = voted({**first, slot(LEDGER, 17): 15, slot(CREDIT, 34): 5, slot(CLOSED, 0): 1}, 0, release)
+    expect('close-index-1', runtime, data('settle', 1), voted(two, 1, release), first, 1)
+    expect('open-index-0', runtime, data('settle', 0), voted(first, 0, release), both, 1)
     return len(rows) + 3 + again + 2
 
 
@@ -280,6 +329,46 @@ def withdraw_cases(runtime):
     return 2 + len(rows) + withdraw_reentry_cases(runtime)
 
 
+def vote_cases(runtime):
+    # M4 R2 to R5: vote c b writes b into the field at 4^m of the slot 7 word of
+    # claim c for member m (a new ballot replaces the old one). settle c reverts
+    # unless all n fields are present, and any caller can settle.
+    claim = {COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34, slot(AMOUNT, 0): 5,
+             slot(LEDGER, 17): 20, slot(LEDGER, 34): 10}
+    mark = slot(BALLOTS, 0)
+    for m, member in enumerate(MEMBERS):
+        others = pack((3, 3, 3)) - 3 * 4**m
+        new = others + (m + 1) * 4**m
+        expect(f'vote-member-{m}', runtime, data('vote', 0, m + 1), {**claim, mark: others},
+               {**claim, mark: new}, new, caller=member)
+    chain('vote-replace', runtime, [(MEMBERS[1], data('vote', 0, 1), 4),
+                                    (MEMBERS[1], data('vote', 0, 2), 8)], claim, {**claim, mark: 8})
+    rows = [('non-member', data('vote', 0, 1), 0, claim, OUTSIDER),
+            ('closed', data('vote', 0, 1), 0, {**claim, slot(CLOSED, 0): 1}, SENDER),
+            ('unknown', data('vote', 1, 1), 0, claim, SENDER),
+            ('value', data('vote', 0, 1), 1, claim, SENDER),
+            ('short', data('vote', 0, 1)[:-2], 0, claim, SENDER)]
+    for label, calldata, value, before, caller in rows:
+        expect(f'vote-{label}', runtime, calldata, before, before, None, value=value, caller=caller)
+    # A vote on claim 1 leaves the claim 0 word, so settle(0) still has no ballot of member 2.
+    two = voted({**claim, COUNT: 2, slot(PAYER, 1): 34, slot(PAYEE, 1): 17, slot(AMOUNT, 1): 3},
+                0, (1, 1, 0))
+    chain('vote-claim-binding', runtime, [(MEMBERS[2], data('vote', 1, 1), 16),
+                                          (SENDER, data('settle', 0), None)],
+          two, {**two, slot(BALLOTS, 1): 16})
+    for m in range(len(MEMBERS)):
+        missing = {**claim, mark: pack((1, 1, 1)) - 4**m}
+        expect(f'settle-missing-{m}', runtime, data('settle', 0), missing, missing, None)
+    released = {**claim, slot(LEDGER, 17): 15, slot(CREDIT, 34): 5, slot(CLOSED, 0): 1,
+                mark: pack((1, 1, 3))}
+    expect('settle-any-caller', runtime, data('settle', 0), {**claim, mark: pack((1, 1, 3))},
+           released, 1, caller=OUTSIDER)
+    votes = [(member, data('vote', 0, b), pack((1, 1, 3)[:m + 1]))
+             for m, (member, b) in enumerate(zip(MEMBERS, (1, 1, 3)))]
+    chain('chained', runtime, votes + [(OUTSIDER, data('settle', 0), 1)], claim, released)
+    return 3 + 1 + len(rows) + 1 + len(MEMBERS) + 2
+
+
 def entry_cases(runtime, regime):
     claim = {slot(LEDGER, 17): 3}
     after = {slot(LEDGER, 17): 8, COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34, slot(AMOUNT, 0): 5}
@@ -305,15 +394,16 @@ def main():
             'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470', 'keccak256("")')
     require(bytecode('keccak', 'transfer(address,uint256)')[:8] == 'a9059cbb', 'transfer selector')
     cases = refusals()
-    runtime = bytecode('runtime', 3, 'debreu', *CODES)
-    deploy('debreu-deploy', bytecode('creation', 3, 'debreu', *CODES), runtime)
+    runtime = bytecode('runtime', 3, 'debreu', *CODES, *addresses(3))
+    deploy('debreu-deploy', bytecode('creation', 3, 'debreu', *CODES, *addresses(3)), runtime)
     cases += (debreu_cases(runtime) + closing_cases(runtime) + withdraw_cases(runtime) +
-              entry_cases(runtime, 'debreu'))
-    packed = sum(code * 4**index for index, code in enumerate(CODES))
-    expect('amend', runtime, data('amend'), {}, {}, packed)
+              entry_cases(runtime, 'debreu') + vote_cases(runtime))
+    expect('amend', runtime, data('amend'), {}, {}, pack(CODES))
     expect('amend-value', runtime, data('amend'), {}, {}, None, value=1)
     expect('cast-value', runtime, data('cast', 1, 1, 3), {}, {}, None, value=1)
-    expect('settle-short', runtime, data('settle', 0, 1, 1, 3)[:-64], {}, {}, None)
+    ready = voted({COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34, slot(AMOUNT, 0): 5,
+                   slot(LEDGER, 17): 20}, 0, (1, 1, 3))
+    expect('settle-short', runtime, data('settle', 0)[:-2], ready, ready, None)
     cases += 4
     impossible = bytecode('runtime', 3, 'impossibility')
     deploy('impossibility-deploy', bytecode('creation', 3, 'impossibility'), impossible)
@@ -323,18 +413,35 @@ def main():
     credit = {slot(CREDIT, int(SENDER, 16)): 30}
     expect('impossibility-withdraw', impossible, data('withdraw', 12), credit, credit, None,
            balance=100, balances={RECEIVER: 100, SENDER: FUNDS})
-    cases += 2
+    # M4 R6: Arrow-impossibility has no vote entry.
+    expect('impossibility-vote', impossible, data('vote', 0, 1), ready, ready, None)
+    cases += 3
     for members, codes, vectors in (
             (1, (3, 2, 1), [(1,), (2,), (3,)]),
             (14, tuple(i % 3 + 1 for i in range(120)),
              [tuple((m * k) % 3 + 1 for m in range(14)) for k in range(5)] + [(1,) * 14, (2,) * 14])):
-        code = bytecode('runtime', members, 'debreu', *codes)
+        code = bytecode('runtime', members, 'debreu', *codes, *addresses(members))
         for k, ballots in enumerate(vectors):
+            decision = verdict(members, codes, ballots)
             expect(f'cast-n{members}-{k}', code, data('cast', *ballots), {}, {},
-                   verdict(members, codes, ballots))
+                   decision)
+            before = voted({COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34,
+                            slot(AMOUNT, 0): 5, slot(LEDGER, 17): 20}, 0, ballots)
+            after = dict(before)
+            if decision in (1, 2):
+                after[slot(LEDGER, 17)] = 15
+                after[slot(CREDIT, 34 if decision == 1 else 17)] = 5
+                after[slot(CLOSED, 0)] = 1
+            expect(f'settle-n{members}-{k}', code, data('settle', 0), before, after, decision)
+            cases += 2
+        for m, member in enumerate(addresses(members)):
+            mark = slot(BALLOTS, 0)
+            others = pack((3,) * members) - 3 * 4**m
+            new = others + (m % 3 + 1) * 4**m
+            expect(f'vote-n{members}-{m}', code, data('vote', 0, m % 3 + 1),
+                   {COUNT: 1, mark: others}, {COUNT: 1, mark: new}, new, caller=member[2:])
             cases += 1
-        packed = sum(c * 4**index for index, c in enumerate(codes))
-        expect(f'amend-n{members}', code, data('amend'), {}, {}, packed)
+        expect(f'amend-n{members}', code, data('amend'), {}, {}, pack(codes))
         cases += 1
     print(f'SETTLEMENT cases={cases} deploy=2 geth=expected OK (logs: {WORK})')
 
