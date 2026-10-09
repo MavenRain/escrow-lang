@@ -465,6 +465,8 @@ facts are in `probe/CAPABILITY.md`.
   (an example program in that repository) or Lean 4 (a module in
   `self-referential-dao`). On a host without UAT, the left side of the
   equivalence is a local record of the left Kan extension at a discrete
-  `D` (`L`, the unit, `desc`, `fac` and `uniq`). Chunk 0 adds a test row
-  that reaches `REFUSE_ADDRESSES`. The last chunk updates section 4.1 and
-  O1.
+  `D` (`L`, the unit, `desc`, `fac` and `uniq`). Chunk 0 is done
+  (2026-10-09): the row `addresses-missing` of `test/refusal.sh` builds
+  `test/mutants/debreu-no-addresses.esc` (the Arrow-Debreu example without
+  `memberAddresses`) and gets `REFUSE_ADDRESSES`. `make test` gives 107 ok.
+  The last chunk updates section 4.1 and O1.

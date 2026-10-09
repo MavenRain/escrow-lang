@@ -29,6 +29,20 @@ refuse() {
   if [ "$status" -eq 1 ] && [ "$shape" -eq 1 ]; then pass "$name"; else fail "$name: exit $status, stderr: $err"; fi
 }
 
+# refuse_build NAME CODE DEF FILE: escrowc build of FILE exits 1 with stderr
+# "escrowc: CODE: DEF: ...". Only build reaches REFUSE_ADDRESSES.
+refuse_build() {
+  name=$1 code=$2 def=$3 file=$4
+  "$escrowc" build "$file" -o "$out/$name.hex" > /dev/null 2> "$out/$name.err"
+  status=$?
+  err=$(cat "$out/$name.err")
+  case $err in
+    "escrowc: $code: $def: "*) shape=1 ;;
+    *) shape=0 ;;
+  esac
+  if [ "$status" -eq 1 ] && [ "$shape" -eq 1 ]; then pass "$name"; else fail "$name: exit $status, stderr: $err"; fi
+}
+
 members='def members : Nat := 3'
 
 refuse members-missing REFUSE_MEMBERS - 'def x : Nat := 0'
@@ -67,6 +81,8 @@ refuse address-range REFUSE_ADDRESS_RANGE memberAddresses "$members" \
   "def memberAddresses : Addresses := acons $a1 (acons $a2 (acons 0x10000000000000000000000000000000000000000 anil))"
 refuse address-repeat REFUSE_ADDRESS_REPEAT memberAddresses "$members" \
   "def memberAddresses : Addresses := acons $a1 (acons $a2 (acons $a1 anil))"
+# An Arrow-Debreu program without memberAddresses passes check. build refuses it.
+refuse_build addresses-missing REFUSE_ADDRESSES memberAddresses "$root/test/mutants/debreu-no-addresses.esc"
 refuse lex-hex-65 LEX_HEX a "$members" 'def a : Nat := 0x10000000000000000000000000000000000000000000000000000000000000000'
 
 if [ "$failures" -eq 0 ]; then echo "refusal.sh: all passed"; exit 0; fi
