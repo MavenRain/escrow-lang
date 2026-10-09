@@ -1,10 +1,10 @@
-The design below is in Conal Elliott's sense: a simple mathematical meaning is fixed first, a representation is chosen second, and every operation is required to be a homomorphism for a total meaning function \(\llbracket\cdot\rrbracket\). Assay is the representation language. The meaning is the pairing of the aggregation already fixed in `self-referential-dao` with an escrow algebra that the aggregation is allowed to settle. Correctness of any later bytecode is agreement with this denotation, not resemblance to it.
+The design below is in Conal Elliott's sense: a simple mathematical meaning is fixed first, a representation is chosen second, and every operation is required to be a homomorphism for a total meaning function \(\llbracket\cdot\rrbracket\). The representation uses assay-style notation and the TinyCC host (section 5). The core meaning is the pairing of the aggregation already fixed in `self-referential-dao` with an escrow algebra that the aggregation is allowed to settle. The stored-voting adapter additionally retains the configuration context described below. Correctness of the bytecode is agreement with this denotation, not resemblance to it.
 
 ## 1. Stance
 
 Elliott's rule is that the instance's meaning is the meaning's instance. Applied here:
 
-- The model is not storage, ballots, gas, or an EVM trace.
+- The core model is not storage, ballots, gas, or an EVM trace. The stored-voting adapter must retain its configuration inputs (section 2).
 - \(\llbracket\cdot\rrbracket\) is total.
 - An operation `op` on the representation is admitted only when there is an `op'` on the model with \(\llbracket \mathrm{op}\, a\, b\rrbracket = \mathrm{op}'\, \llbracket a\rrbracket\, \llbracket b\rrbracket\).
 - A failed homomorphism is an abstraction leak and is rejected, not patched.
@@ -55,6 +55,10 @@ Settlement reads the verdict out of the aggregation and never out of storage:
 
 So the rule that moves funds is the rule the DAO constitutes. That is the whole coupling.
 
+The pair above is the core meaning. The contract adapter also retains a context \(\Gamma\): the stable index-to-claim association and closed flags (O4), plus a partial configuration for each index (O13). Write \(\Gamma(c,m)\) for the decision recorded by member \(m\), or unvoted. Its full state meaning is \((L,s,\Gamma)\), with the core projection \(\pi(L,s,\Gamma)=(L,s)\); the open claims of \(s\) are the open indexed records of \(\Gamma\) in insertion order. Deposit appends a fresh open indexed record with every member unvoted. Release and refund close that record while retaining its configuration.
+
+Core settlement takes an explicit complete configuration \(X\), as source `settle F L x c s hc ho h` does (SPEC section 5). The contract entry `settle(c)` obtains \(X_c\) from \(\Gamma\). It cannot be an operation on \((L,s)\) alone: forgetting \(\Gamma\) would forget both readiness and the configuration that selects the verdict.
+
 ## 3. Meaning of the operations
 
 Write \(s\) for an escrow state and \(L\) for a chosen aggregation. The five operations that earn a homomorphism:
@@ -62,7 +66,7 @@ Write \(s\) for an escrow state and \(L\) for a chosen aggregation. The five ope
 **Deposit** does not consult governance.
 
 \[
-\llbracket\mathrm{deposit}\, p\, n\rrbracket\,(L, s) \;=\; (L,\; s\{\mathrm{ledger}\, p \mathrel{+}= n,\; \mathrm{claims} \mathrel{+\!=} (p, q, n)\}).
+\pi\llbracket\mathrm{deposit}\, p\, q\, n\rrbracket\,(L, s,\Gamma) \;=\; (L,\; s\{\mathrm{ledger}\, p \mathrel{+}= n,\; \mathrm{claims} \mathrel{+\!=} (p, q, n)\}).
 \]
 
 It is the monoid action of \(A\) on the ledger, paired with the identity on \(L\).
@@ -70,15 +74,15 @@ It is the monoid action of \(A\) on the ledger, paired with the identity on \(L\
 **Cast** is a local choice of configuration, anonymized by the orbit projection. Its meaning is the unit of the Kan extension, not a write:
 
 \[
-\llbracket\mathrm{cast}\, X\rrbracket\,(L, s) \;=\; (L, s) \quad\text{with evidence}\quad \mathrm{unit}_X : F.X \to L.\mathrm{functor}(\mathrm{orbitProjection}\, X).
+\llbracket\mathrm{cast}\, X\rrbracket\,(L, s,\Gamma) \;=\; (L, s,\Gamma) \quad\text{with evidence}\quad \mathrm{unit}_X : F.X \to L.\mathrm{functor}(\mathrm{orbitProjection}\, X).
 \]
 
 Two ballots in the same orbit denote the same cast. That is `lan_implies_orbit_constant`, re-exported rather than re-proved.
 
-**Settle** factors through the verdict. For an open claim \(c = (p, q, n)\) at configuration \(X\), with the proof \(h : n \le \mathrm{ledger}\, p\),
+**Settle** factors through the verdict. For an open claim \(c = (p, q, n)\) and a complete configuration \(X\), with the proof \(h : n \le \mathrm{ledger}\, p\),
 
 \[
-\llbracket\mathrm{settle}\, c\rrbracket\,(L, s) \;=\;
+\mathrm{settle}_{\mathrm{core}}(c,X)(L, s) \;=\;
 \begin{cases}
 (L,\; s\{\mathrm{ledger}\, p \mathrel{-}= n,\; \mathrm{credit}\, q \mathrel{+}= n,\; \mathrm{claims} \mathrel{-}= c\}) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Release}, \\
 (L,\; s\{\mathrm{ledger}\, p \mathrel{-}= n,\; \mathrm{credit}\, p \mathrel{+}= n,\; \mathrm{claims} \mathrel{-}= c\}) & \text{if }\mathrm{verdict}(L, X) = \mathrm{Refund}, \\
@@ -88,19 +92,33 @@ Two ballots in the same orbit denote the same cast. That is `lan_implies_orbit_c
 
 Release and refund close the claim: \(\mathrm{claims} \mathrel{-}= c\) removes \(c\) from the open claims (SPEC O4). The contract keeps the index of \(c\) and sets its closed flag, so the indices of the other claims do not change. Hold changes nothing. The claim stays open, and a later settle can decide it.
 
+The contract adapter reads \(X_c\) from storage and takes no ballots, so any caller can settle. Until every member has voted on \(c\), this entry is not defined and the call reverts. On a successful call it applies the core case split to the claim associated with index \(c\) and \(X_c\). Release and refund also close that indexed record in \(\Gamma\); hold leaves it open. The stored ballots stay after every verdict.
+
 Settle sends no funds. Release and refund move \(n\) from the ledger into the credit, which is the monoid action of \(A\) on the credit (SPEC O7). The payee or the payer then gets the funds with withdraw.
 
 Partiality is genuine: in the Arrow-impossibility regime \(\mathrm{Aggregation}\,\mathrm{act}\, F\) is empty, so \(\llbracket\mathrm{settle}\rrbracket\) is the empty function. Funds are stuck, and that is the denotation, not a bug.
 
-**Withdraw** does not consult governance. For the caller \(a\) and an amount \(n \le \mathrm{credit}\, a\), it first debits the credit. For a fixed EVM environment, write \(C_{a,n}\) for the transformation of the escrow state induced by sending \(n\) to \(a\) and running the recipient, including its reentrant calls. On a successful send,
+**Vote** supplies the adapter's configuration input. It is not one of the five core operations. On its valid domain (an open claim, a registered member and a valid decision), its full meaning updates \(\Gamma\), while its core projection is unchanged:
 
 \[
-\llbracket\mathrm{withdraw}\, n\rrbracket_{C}\,(L, s) \;=\; (L,\; C_{a,n}(s\{\mathrm{credit}\, a \mathrel{-}= n\})).
+\llbracket\mathrm{vote}\, c\, b\rrbracket_m\,(L, s,\Gamma)
+\;=\; (L,s,\Gamma[(c,m)\mapsto b]),
+\qquad \pi\circ\llbracket\mathrm{vote}\, c\, b\rrbracket_m=\pi.
 \]
 
-The debit is a partial inverse of the monoid action of \(A\) on the credit, paired with the identity on \(L\). \(A\) is cancellative, so \(\mathrm{credit}\, a \mathrel{-}= n\) has one value when \(n \le \mathrm{credit}\, a\). For a larger \(n\), withdraw is not defined, and the call reverts. The full withdrawal composes the debit with \(C_{a,n}\), which is the identity only when recipient execution leaves the escrow state unchanged. The credit guard alone does not guarantee that the send succeeds.
+Member \(m\) records the ballot \(b\) on the open claim \(c\) in the representation (slot 7, section 5). A later vote of \(m\) on \(c\) replaces it. The member addresses decide which callers are members. The verdict still depends only on the orbit of the ballots, never on a voter address (section 4). In the Arrow-impossibility regime the contract has no member addresses and no vote.
 
-The contract debits the credit first, then it sends \(n\) wei to \(a\). If the send fails, the call reverts and the state stays \((L, s)\), including rollback of reentrant changes. The recipient can call withdraw, deposit or settle during the send. Each withdrawal checks and debits the current credit before its send. For a fixed address, cumulative withdrawals are bounded by its initial credit plus credit added by settlements during recipient execution. Withdraw reads the credit of \(a\) again after the send and returns it, so the result includes both debits and new settlement credits. For example, credit 30 followed by withdraw 12 and a reentrant settlement adding 5 returns 23; a further reentrant withdrawal of 23 makes the total sent 35.
+For example, with the three-member Arrow-Debreu example, an open claim \((p,q,5)\), \(p\ne q\), and payer balance 20, three release votes and three refund votes leave the same core state. The next `settle(c)` credits 5 to \(q\) in the first case and to \(p\) in the second. Thus vote is not the identity on the full state, and contract settlement does not factor through \(\pi\) alone.
+
+**Withdraw** does not consult governance. For the caller \(a\) and an amount \(n \le \mathrm{credit}\, a\), it first debits the credit. For a fixed EVM environment and initial configuration context \(\Gamma\), write \(C^{\Gamma}_{a,n}\) for the core projection of sending \(n\) to \(a\) and running the recipient, including its reentrant calls on the full adapter state. On a successful send,
+
+\[
+\pi\llbracket\mathrm{withdraw}\, n\rrbracket_{C}\,(L, s,\Gamma) \;=\; (L,\; C^{\Gamma}_{a,n}(s\{\mathrm{credit}\, a \mathrel{-}= n\})).
+\]
+
+The debit is a partial inverse of the monoid action of \(A\) on the credit, paired with the identity on \(L\). \(A\) is cancellative, so \(\mathrm{credit}\, a \mathrel{-}= n\) has one value when \(n \le \mathrm{credit}\, a\). For a larger \(n\), withdraw is not defined, and the call reverts. The full withdrawal composes the debit with recipient execution on \((L,s,\Gamma)\); its core effect is \(C^{\Gamma}_{a,n}\). This execution is the identity only when it leaves the full state unchanged. The credit guard alone does not guarantee that the send succeeds.
+
+The contract debits the credit first, then it sends \(n\) wei to \(a\). If the send fails, the call reverts and the state stays \((L, s,\Gamma)\), including rollback of reentrant changes. The recipient can call withdraw, deposit, vote or settle during the send. Each withdrawal checks and debits the current credit before its send. For a fixed address, cumulative withdrawals are bounded by its initial credit plus credit added by settlements during recipient execution. Withdraw reads the credit of \(a\) again after the send and returns it, so the result includes both debits and new settlement credits. For example, credit 30 followed by withdraw 12 and a reentrant settlement adding 5 returns 23; a further reentrant withdrawal of 23 makes the total sent 35.
 
 In the Arrow-impossibility regime no settle occurs, so each credit stays empty, and withdraw reverts. The escrow is deposit-only, and the funds stay in the contract (section 4).
 
@@ -110,7 +128,7 @@ In the Arrow-impossibility regime no settle occurs, so each credit stays empty, 
 \llbracket\mathrm{amend}\rrbracket \;=\; \mathrm{Gov}, \qquad \mathrm{GovPhi}\,(\mathrm{canonicalAmendment}\,\mathrm{act})\, L \;=\; \mathrm{Gov}\, L.
 \]
 
-Amendment rewrites the constitution the next settlement will read. It does not rewrite the ledger. A self-constituting constitution is a fixed point
+Canonical amendment yields the constitution the next settlement will read. At the discrete decision category used here it agrees with \(F\) on every configuration, so the contract returns the packed verdict table and changes neither the rule nor storage (SPEC O5). A self-constituting constitution is a fixed point
 
 \[
 \mathrm{IsSelfConstituting}\, F \;:\equiv\; \exists L.\; \forall X.\; (\mathrm{Gov}\, L).\mathrm{obj}\, X = F.\mathrm{obj}\, X,
@@ -131,76 +149,123 @@ because \((\mathrm{Gov}\, L).\mathrm{map}(p \gg q) = (\mathrm{Gov}\, L).\mathrm{
 | Regime | Aggregation | Escrow denotation |
 |---|---|---|
 | Arrow-impossibility | empty | no legitimate settle; ledger frozen |
-| Arrow-Debreu | object-unique \(L\) | unique successor state |
+| Arrow-Debreu | object-unique \(L\) | unique successor state at a fixed complete configuration |
 | Schelling-Ising | two object-distinct \(L_1, L_2\) | two legitimate successor states (object-fork of the escrow, not a double spend) |
 
 The fork is a fork of mediators, both factoring through their own Lan. It is not two writes of the same slot. Anonymity is inherited: settlement depends on the orbit of ballots, never on a voter address, because the verdict factors through \(\mathrm{orbitProjection}\).
 
-## 5. Assay representation
+## 5. Assay-style representation sketch
 
-Assay is not the model. A `.asy` file is a representation whose meaning is required to be the pair above. Proof terms erase, as assay already erases them; the Lean/UAT meaning function stays outside the bytecode. Surface follows `CounterSurface.asy`.
+The sketch below uses assay-style notation, not executable `.asy` source. The TinyCC host writes the bytecode in `src/evm.c` and uses no assay (SPEC section 8). Proof terms erase, and the Lean/UAT meaning function stays outside the bytecode. The sketch follows SPEC section 7: storage slots 0 to 7 and the six entries `deposit`, `cast`, `vote`, `settle`, `amend` and `withdraw`. Storage represents the full adapter state \((L,s,\Gamma)\) of section 2. The constitution is the verdict table in the runtime code, not storage. The `match` in `settle` is not assay surface (SPEC O12). Selector, calldata-length and nonpayable guards are implicit in the entry declarations; arithmetic uses checked addition.
 
 ```asy
--- Representation of (DAORep, EscrowState). Not the meaning.
+-- Representation of (DAORep, EscrowState, adapter context). Not the meaning.
 contract EscrowDAO where
   storage Rep := {
-    ledger      : Word ;   -- packing of Address -> A; meaning is the monoid
-    claims      : Word ;   -- packing of List Claim
-    beta        : Word ;   -- coordination pressure, a parameter of F
-    constitution: Word     -- code of the choice rule F, not a verdict
+    ledger  : Word ;   -- slot 0: Address -> A; meaning is the monoid
+    count   : Word ;   -- slot 1: the claim count
+    payer   : Word ;   -- slot 2: claim index -> payer
+    payee   : Word ;   -- slot 3: claim index -> payee
+    amount  : Word ;   -- slot 4: claim index -> amount
+    credit  : Word ;   -- slot 5: Address -> A, the withdrawable credit (O7)
+    closed  : Word ;   -- slot 6: claim index -> 1 closed, 0 open (O4)
+    ballots : Word     -- slot 7: claim index -> X_c, member m at 4^m, 0 no ballot (O13)
   }
 
-  -- ⟦deposit p n⟧ = monoid action on ledger, identity on Aggregation
-  payable entry deposit (payer : Word) (payee : Word) (n : Word) : Eff Sig Word :=
-    do amt <- callvalue ;
+  -- ⟦deposit p q n⟧ = monoid action on ledger, identity on Aggregation
+  payable entry deposit (p : Word) (q : Word) (n : Word) : Eff Sig Word :=
+    do guard addressWord p ;          -- p < 2^160
+       guard addressWord q ;          -- q < 2^160
+       amt <- callvalue ;
        guard le n amt ;
-       bal <- sload ledger ;
-       bal' <- add bal n ;
-       sstore ledger bal' ;
-       pure bal'
+       bal <- sload (ledger p) ;
+       bal' <- checkedAdd bal n ;
+       sstore (ledger p) bal' ;
+       c <- sload count ;
+       sstore (payer c) p ;
+       sstore (payee c) q ;
+       sstore (amount c) n ;
+       k <- checkedAdd c 1 ;
+       sstore count k ;
+       pure c
 
   -- ⟦cast X⟧ = unit of the Kan extension; orbit-constant by lan_implies_orbit_constant
   entry cast (config : Word) : Eff Sig Word :=
-    do pure config
+    do v <- verdict config ;          -- config = b1 .. bn; writes nothing
+       pure v
 
-  -- ⟦amend⟧ = Gov. Guard is the erased witness of IsSelfConstituting.
-  entry amend (newBeta : Word) : Eff Sig Word :=
-    do guard selfConstituting ;
-       sstore beta newBeta ;
-       pure newBeta
+  -- ⟦vote c b⟧ updates Gamma; its projection to (L, s) stays unchanged
+  entry vote (c : Word) (b : Word) : Eff Sig Word :=
+    do a <- caller ;
+       m <- member a ;                -- reverts unless a is in memberAddresses
+       k <- sload count ;
+       guard lt c k ;
+       f <- sload (closed c) ;
+       guard eq f 0 ;                 -- O4
+       guard ballot b ;               -- b is 1, 2 or 3
+       x <- sload (ballots c) ;
+       x' <- setBallot x m b ;        -- replaces field m, at 4^m
+       sstore (ballots c) x' ;
+       pure x'
 
-  -- ⟦settle c⟧ factors through (Gov L).obj. Partial: empty in Arrow-impossibility.
-  entry settle (payer : Word) (payee : Word) (n : Word) : Eff Sig Word :=
-    do v <- verdict ;                 -- denotes (Gov L).obj X, not a storage read
-       guard eq v release ;
-       bal <- sload ledger ;
-       bal' <- sub bal n ;
-       sstore ledger bal' ;
-       pure bal'
+  -- ⟦settle c⟧ factors through (Gov L).obj at X_c. Partial: empty in Arrow-impossibility.
+  entry settle (c : Word) : Eff Sig Word :=
+    do k <- sload count ;
+       guard lt c k ;
+       f <- sload (closed c) ;
+       guard eq f 0 ;                 -- O4
+       x <- sload (ballots c) ;
+       guard allVoted x ;             -- O13: no field is 0
+       v <- verdict x ;               -- denotes (Gov L).obj X_c
+       p <- sload (payer c) ;
+       q <- sload (payee c) ;
+       n <- sload (amount c) ;
+       bal <- sload (ledger p) ;
+       guard le n bal ;               -- the proof h, also on hold
+       match v with
+       | release => do sstore (ledger p) (sub bal n) ; addCredit q n ; sstore (closed c) 1
+       | refund  => do sstore (ledger p) (sub bal n) ; addCredit p n ; sstore (closed c) 1
+       | hold    => pure () ;
+       pure v
+
+  -- ⟦amend⟧ = Gov. At a discrete D, Gov L agrees with F, so amend writes nothing (O5).
+  entry amend : Eff Sig Word :=
+    do guard selfConstituting ;       -- erased witness of IsSelfConstituting
+       t <- table ;                   -- the packed verdict table, sum C_i * 4^i
+       pure t
+
+  -- ⟦withdraw n⟧ = credit debit, then the send C_{a,n}; identity on Aggregation
+  entry withdraw (n : Word) : Eff Sig Word :=
+    do a <- caller ;
+       cr <- sload (credit a) ;
+       guard le n cr ;
+       sstore (credit a) (sub cr n) ; -- debit first
+       send a n ;                     -- all the gas; a failed send reverts
+       cr' <- sload (credit a) ;      -- read again after the send
+       pure cr'
 
   constructor :=
-    do sstore beta (word 1) ;         -- critical point; disordered phase self-constitutes
-       sstore ledger (word 0) ;
-       pure ()
+    do pure ()                        -- writes no storage
 ```
 
 The dictionary that makes this a denotation rather than a sketch:
 
 | Assay form | Denotation | Homomorphism? |
 |---|---|---|
-| `storage Rep` | representation of \(\Sigma L.\, E\), not \(E\) itself | not an operation |
+| `storage Rep` | representation of \((L,s,\Gamma)\), with core projection \(\Sigma L.\, E\); slots 0 to 7 of SPEC section 7 | not an operation |
 | `deposit` | monoid action of \(A\), identity on \(L\) | yes |
 | `cast` | unit of \(\mathrm{LeftKanExtension}\) | yes (orbit-constant) |
-| `amend` | \(\mathrm{Gov}\) | yes (`hom_amend`, by `rfl`) |
-| `settle` | case on \((\mathrm{Gov}\, L).\mathrm{obj}\) | yes, where \(L\) exists |
+| `vote` | updates \(\Gamma(c,m)\); its core projection stays \((L,s)\) | adapter operation, not one of the five core operations (section 3) |
+| `amend` | \(\mathrm{Gov}\); returns the packed verdict table and writes nothing | yes (`hom_amend`, by `rfl`) |
+| `settle` | core case on \((\mathrm{Gov}\, L).\mathrm{obj}\,X\); the adapter obtains \(X_c\) from \(\Gamma\) | at an explicit complete \(X\), where \(L\) exists; not through the core state alone |
 | `credit` | a second `Ledger`, packing of \(\mathrm{Address} \to A\); settle applies `add` to it, withdraw applies `sub` to it | not an operation |
 | `closed` | the closed flag at each stable claim index (`Closed`); settle applies `close` on release and refund, the representation of \(\mathrm{claims} \mathrel{-}= c\) | not an operation |
-| `withdraw` | partial credit debit composed with recipient execution \(C_{a,n}\), identity on \(L\) | relative to the recipient context \(C_{a,n}\) in section 3 |
+| `ballots` | representation of the partial configurations \(\Gamma\), 2 bits per member; vote writes it, settle reads it | not an operation |
+| `withdraw` | partial credit debit composed with recipient execution on \((L,s,\Gamma)\), identity on \(L\) | relative to the recipient context \(C^{\Gamma}_{a,n}\) in section 3 |
 | `verdict` | \((\mathrm{Gov}\, L).\mathrm{obj}\, X\) | bridge, not an operation |
 | `selfConstituting` | erased witness of \(\mathrm{IsSelfConstituting}\, F\) | proof, erased |
-| `beta` | parameter of \(F\), not a tally | representation only |
 
-`verdict` and `selfConstituting` are not assay primitives. They are the names of the meaning-level guards. Assay's existing erasure discipline is the right implementation story: the guard is checked, the proof is dropped, and the bytecode is correct exactly when its accepted traces agree with the case split in §3.
+`verdict` and `selfConstituting` are not assay primitives. They are the names of the meaning-level guards. `addressWord`, `checkedAdd`, `member`, `ballot`, `setBallot`, `allVoted`, `table`, `addCredit` and `send` are also not assay primitives: they name short code sequences in `src/evm.c`. `addCredit` checks addition overflow too. The host checks the guards and drops their proof witnesses. Correct bytecode must agree with the case split in §3 at the configuration read by the adapter, including its readiness and authorization guards.
 
 ## 6. What is deliberately not a homomorphism
 

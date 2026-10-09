@@ -1,6 +1,6 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M4 (ballots on chain; section 10).
+Status: draft, milestone M4 (ballots on chain, all three chunks done; section 10).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -202,7 +202,7 @@ only proposals are identities and `propose p ; q` is vacuous (design section
 | Regime | `Aggregation F` | Compiled contract |
 |---|---|---|
 | Arrow-impossibility | no inhabitant | `deposit` only; `cast`, `settle` and `amend` each need `L` |
-| Arrow-Debreu | one orbit rule | all five entries, including `withdraw` |
+| Arrow-Debreu | one orbit rule | all six entries, including `vote` and `withdraw` |
 | Schelling-Ising | not reachable at a discrete `D` (section 4.1; USER ruling 2026-10-06) | not applicable |
 
 ## 7. What the compiler writes
@@ -259,6 +259,10 @@ range). The Arrow-impossibility writer has no verdict table and no
   Hold writes nothing, so the claim stays open and a later `settle` can
   decide it. Stored ballots stay after every verdict. It returns the
   verdict. A failed guard reverts.
+  The source operation still takes an explicit configuration `x` (section 5).
+  The contract adapter retains the pending configurations in addition to the
+  core escrow state; `vote` changes that context. See design sections 2 and 3
+  for its meaning and the core projection.
 - `amend()` takes no argument at the canonical `Phi`. It returns the packed
   verdict table `sum C_i * 4^i` and writes nothing (O5).
 - `withdraw(n)` guards `n <= credit caller`, debits `n` from the credit of
@@ -330,12 +334,16 @@ facts are in `probe/CAPABILITY.md`.
   `c` from the claims and did not require `c` to be in the claims, so one
   claim could settle two times while the payer balance covered it. M3
   built the ruling in chunks 1 to 4 (section 10).
-- O5. At a discrete `D`, `gov F L` agrees with `F` on each configuration.
-  The canonical `amend` therefore changes no verdict. The design section 5
-  sketch writes `beta` in `amend`, which changes `F` and is not `gov`.
-- O6. The design section 5 sketch reverts `settle` unless the verdict is
-  release. Design section 3 debits on refund and does nothing on hold. The
-  compiler follows section 3.
+- O5. CLOSED 2026-10-08 by M4 chunk 3. At a discrete `D`, `gov F L` agrees
+  with `F` on each configuration. The canonical `amend` therefore changes
+  no verdict. The old design section 5 sketch wrote `beta` in `amend`,
+  which changes `F` and is not `gov`. Now the sketch follows section 7:
+  `amend` returns the packed verdict table and writes nothing.
+- O6. CLOSED 2026-10-08 by M4 chunk 3. The old design section 5 sketch
+  reverted `settle` unless the verdict was release. Design section 3
+  debits on refund and does nothing on hold, and the compiler follows
+  section 3. Now the sketch settles the claim index `c` with the release,
+  refund and hold legs of section 3.
 - O7. RULED 2026-10-07 (USER): pull payments. Release moves `n` from the
   ledger of `p` to a withdrawable credit of `q`. Refund moves `n` from the
   ledger of `p` to a credit of `p`. A new nonpayable entry `withdraw(n)`
@@ -398,7 +406,8 @@ facts are in `probe/CAPABILITY.md`.
   source `settle` is the stored ballots. Before M4, `cast` and `settle`
   read the ballots from calldata and the contract had no member addresses.
   Thus any caller of `settle` could pick the verdict, for example a payee
-  sending `n` release ballots. M4 implements the ruling (section 10).
+  sending `n` release ballots. M4 built the ruling in chunks 1 to 3
+  (section 10).
 
 
 ## 10. Milestones
@@ -431,13 +440,20 @@ facts are in `probe/CAPABILITY.md`.
   `test/differential.py` compares the geth storage after `settle` with
   `escrowc eval` of source `settle`. Chunk 4 changes no EVM code. `make
   test` gives 97 ok.
-- M4 (2026-10-08): O13 as RULED (section 9), ballots on chain. The
-  checker validates `memberAddresses`; the build requires them for
-  Arrow-Debreu. The EVM writer embeds them, adds `vote` and makes `settle`
-  read the ballots of its claim. `test/settlement.py` runs 131 cases in
-  geth, including 1 and 14 members. `test/differential.py` submits actual
-  member votes and compares all 27 default vectors against source `settle`.
-  The three refusal mutants `test/mutants/debreu-first.esc`,
+- M4: O13 as RULED 2026-10-08 (section 9), ballots on chain, in three
+  chunks. All three are done (2026-10-08). The ruling comes with the three
+  refusal mutants `test/mutants/debreu-first.esc`,
   `impossibility-agg-release.esc` and `impossibility-agg-refl.esc` (a
-  constitution or `mkAgg` built on the rule `first`) come with the ruling,
-  so `make test` gives 100 ok.
+  constitution or `mkAgg` built on the rule `first`), so `make test` gives
+  100 ok before chunk 1. (1) The checker validates `memberAddresses`
+  (`REFUSE_ADDRESS_COUNT`, `REFUSE_ADDRESS_RANGE`,
+  `REFUSE_ADDRESS_REPEAT`), and `build` requires them for Arrow-Debreu
+  (`REFUSE_ADDRESSES`). (2) The EVM writer embeds the addresses
+  (`EVM_ADDRESSES`), adds `vote` and makes `settle(c)` read the ballots of
+  claim `c` from slot 7. `test/settlement.py` runs 131 cases in geth,
+  including 1 and 14 members. `test/differential.py` sends one `vote` from
+  each member and then `settle(0)`, and compares all 27 default vectors
+  against source `settle`. Chunk 2 also updated section 7. (3) The
+  documents: this section, design sections 3 and 5 (O5 and O6 CLOSED) and
+  `probe/CAPABILITY.md`.
+  `make test` gives 106 ok.

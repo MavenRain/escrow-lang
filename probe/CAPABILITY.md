@@ -65,14 +65,19 @@ The assay probe results P1 to P8 (2026-10-06) are in the git history:
   Ruling 2 keeps the prelude and both example programs unchanged, so
   `escrowc` checks these forms as they are.
 
-## Gates (2026-10-07)
+## Gates (M4, 2026-10-08)
 
 - `make`, `make check-clang`, `make test` (parse.sh, check.sh, refusal.sh,
   normal-forms.py): GREEN.
-- `python3 test/settlement.py`: `cases=60 deploy=2 geth=expected OK`.
+- `python3 test/settlement.py`: `cases=131 deploy=2 geth=expected OK`
+  (M4, 2026-10-08; M2 had `cases=60`).
 - `python3 test/differential.py`: `vectors=27
-  codes=111123133123222323133323333`, and `amend`, `cast` and `settle` in
-  geth agree with `escrowc table` and `escrowc verdicts`.
-- Differential mutation check: changing only the compiled table entry for
-  three release ballots from 1 to 2 fails at `differential-cast-0`, with
-  geth returning refund while the checker expects release.
+  codes=111123133123222323133323333`. For each vector, each member sends
+  one `vote` on claim 0, then the script calls `settle(0)` (M4). `amend`,
+  `cast` and `settle` in geth agree with `escrowc table` and `escrowc
+  verdicts`, and the geth storage after `settle`, apart from the ballots
+  word, agrees with `escrowc eval` of source `settle`.
+- Differential mutation check: changing the EVM writer's decision code for
+  three release ballots from 1 to 2 fails first at `differential-amend`,
+  because geth returns the altered packed table. The later cast check would
+  return refund while the checker expects release.
