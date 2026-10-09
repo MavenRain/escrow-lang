@@ -1,7 +1,8 @@
 # escrow-lang specification (draft)
 
 Status: draft, milestone M6 done (O2 CLOSED for member classes; section
-10). M5 gave a proof of section 4.1 (O1 CLOSED).
+10), M7 planned (O14, an action on decisions). M5 gave a proof of section
+4.1 (O1 CLOSED).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -520,7 +521,8 @@ facts are in `probe/CAPABILITY.md`.
   action on decisions"). `act` relabels members only, and `Decision` has
   no action. The DAO example also flips decisions (a `Z2` flip on spins).
   escrow-lang has no form for an action on decisions. A design for it
-  needs a USER ruling.
+  needs a USER ruling. M7 plans it (USER ruling 2026-10-09, section 10):
+  an opt-in `Z2` flip, a table check in `escrowc` and a proof.
 
 
 ## 10. Milestones
@@ -604,11 +606,31 @@ facts are in `probe/CAPABILITY.md`.
   tally for each class); chunk 2 `145467e` (decision tables across
   classes); chunk 3 `03b13ae` (EVM voting and settlement); chunk 4
   `58b8c6f` (the example `examples/programs/council.esc` and its test
-  rows); chunk 5 the documents (sections 4, 4.1, 5, 7, 9 and this section,
-  and `probe/CAPABILITY.md`). `make test` gives 131 ok.
+  rows); chunk 5 `ca6294c` (the documents: sections 4, 4.1, 5, 7, 9 and
+  this section, and `probe/CAPABILITY.md`). `make test` gives 131 ok.
   `test/settlement.py` gives `cases=148 deploy=2`. `test/differential.py`
   checks three programs: `arrow-debreu` and `two-classes` at 27 vectors
   each, and `council` at 81 vectors. The 14-member build gives 2170 bytes
   and 120 codes. The proof of section 4.1 (M5) is for one class, and M6
   does not extend it. An action on the decisions (the `Z2` flip of the DAO
   example) is not part of M6 (open item O14).
+- M7: O14, an action on decisions (USER ruling 2026-10-09). Planned. The
+  USER ruling (verbatim): "Z2 flip check + esrow-lang proof (if possible),
+  otherwise Z2 flip check + mechanism-lang proof". A program can declare
+  the `Z2` flip. The flip swaps `release` and `refund` and keeps `hold`,
+  on decisions and on ballots. On a class tally, it swaps the release
+  count and the refund count of each class. For a program with the
+  declaration, `escrowc` refuses a table that does not commute with the
+  flip: `L (flip t)` must equal `flip (L t)` at each row `t`. The proof
+  (section 4.1) shows that `F` commutes with the flip exactly when `L`
+  commutes with it on the image of `orbit`. Rung 1 writes the proof in
+  escrow-lang. If rung 1 fails, rung 2 writes it in mechanism-lang. The
+  chunks: (0) a read-only probe: the source sites, the form of the
+  declaration, the name of the refusal, and whether the prelude can write
+  the flip on `Config` and the lemma `orbit (flip x) = flip (orbit x)` at
+  an open `x`; (1) the prelude and the checker; (2) the table check in
+  `escrowc table` and `build`; (3) the proof; (4) an example and its test
+  rows; (5) the documents. These do not change: `act`, `orbit`, the table
+  rows and their order, the EVM runtime and `amend`. `D` stays discrete
+  (O3). A program without the declaration checks, tabulates and builds
+  as before.
