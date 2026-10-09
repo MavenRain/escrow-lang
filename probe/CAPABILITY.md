@@ -42,9 +42,15 @@ The assay probe results P1 to P8 (2026-10-06) are in the git history:
   regime to 10 members (`VERDICT_LIMIT`). The memory and fuel limits
   still apply within these bounds.
 - EVM writer (`src/evm.c`), Arrow-Debreu: members 1 to 14 (`EVM_LIMIT`),
-  and one code in 1 to 3 per tally with exactly `(n+1)(n+2)/2` codes
-  (`EVM_TABLE`). The bound 14 keeps the packed `amend` table in one word:
-  120 codes of 2 bits are 240 bits, and 15 members give 136 codes (272 bits).
+  and one code in 1 to 3 per class tally (`EVM_TABLE`). At one class there
+  are exactly `(n+1)(n+2)/2` codes. For class sizes `k_i`, the count is the
+  product of `(k_i+1)(k_i+2)/2`, with at most 128 rows. For example,
+  `council` has classes `(2, 2)` and 36 codes, rather than the 15 codes of
+  one class of 4. Before the writer, `escrowc table` and `build` refuse
+  more than 128 rows at two or more classes (`REFUSE_TABLE_SIZE`), after
+  the 1000-member check (`TABLE_LIMIT`). The bound 14 keeps the one-class
+  packed `amend` table in one word: 120 codes of 2 bits are 240 bits, and
+  15 members give 136 codes (272 bits).
 - Runtime size (MEASURED 2026-10-08 at a00089c, M3): the Arrow-Debreu
   runtime at 14 members is 1693 bytes. The limit `EVM_RUNTIME_MAX` is
   24576 bytes (EIP-170). The runtime has the 120-code verdict table and
@@ -65,18 +71,20 @@ The assay probe results P1 to P8 (2026-10-06) are in the git history:
   Ruling 2 keeps the prelude and both example programs unchanged, so
   `escrowc` checks these forms as they are.
 
-## Gates (M4, 2026-10-08)
+## Gates (M4, 2026-10-08; M6 counts, 2026-10-09)
 
 - `make`, `make check-clang`, `make test` (parse.sh, check.sh, refusal.sh,
-  normal-forms.py): GREEN.
-- `python3 test/settlement.py`: `cases=131 deploy=2 geth=expected OK`
-  (M4, 2026-10-08; M2 had `cases=60`).
+  normal-forms.py): GREEN, 131 ok at M6.
+- `python3 test/settlement.py`: `cases=148 deploy=2 geth=expected OK`
+  (M6, 2026-10-09; M4 had `cases=131`, M2 had `cases=60`).
 - `python3 test/differential.py`: `vectors=27
   codes=111123133123222323133323333`. For each vector, each member sends
   one `vote` on claim 0, then the script calls `settle(0)` (M4). `amend`,
   `cast` and `settle` in geth agree with `escrowc table` and `escrowc
   verdicts`, and the geth storage after `settle`, apart from the ballots
-  word, agrees with `escrowc eval` of source `settle`.
+  word, agrees with `escrowc eval` of source `settle`. M6 adds two
+  programs: `test/fixtures/two-classes.esc` (27 vectors, the same codes)
+  and `examples/programs/council.esc` (81 vectors).
 - Differential mutation check: changing the EVM writer's decision code for
   three release ballots from 1 to 2 fails first at `differential-amend`,
   because geth returns the altered packed table. The later cast check would

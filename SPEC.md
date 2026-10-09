@@ -1,7 +1,7 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M5 done (O1 CLOSED, a proof of section 4.1), M6
-planned (O2, member classes; section 10).
+Status: draft, milestone M6 done (O2 CLOSED for member classes; section
+10). M5 gave a proof of section 4.1 (O1 CLOSED).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -123,8 +123,10 @@ Each core type is in `Type 0`. The meaning column cites the design.
 | `Ballot` | the vote of one member | `Decision` |
 | `Ballots` | a list of ballots | `mu`: `bnil`, `bcons` |
 | `T3` | the count triple (release, refund, hold) | `prod (Nat, prod (Nat, Nat))` |
-| `Config` | an object of `Obj`, one ballot per member | `mu` record `mkConfig (xs : Ballots) (e : EqNat (total (tallyOf xs)) members)`; field `ballots` (probe-forced, O10) |
-| `Tally` | an orbit of `Obj` under member relabeling | `mu` record `mkTally (t : T3) (e : EqNat (total t) members)`; field `counts` (probe-forced, O10) |
+| `Classes` | the member class sizes, in member order (M6) | `mu`: `knil`, `kcons` |
+| `Tallies` | one count triple for each class, in class order (M6) | `mu`: `tnil`, `tcons` |
+| `Config` | an object of `Obj`, one ballot per member | `mu` record `mkConfig (xs : Ballots) (e : EqNat (totals (classTallyOf memberClasses xs)) members)`; field `ballots` (probe-forced, O10) |
+| `Tally` | a representation of class tallies; the image of `orbit` represents the orbits of `Obj` under `act` | `mu` record `mkTally (ts : Tallies) (e : EqNat (totals ts) members)`; fields `counts` (over all classes) and `classCounts` (probe-forced, O10) |
 | `ChoiceRule` | `F : Obj => D` | `Config -> Decision` |
 | `Aggregation F` | `Aggregation act F` at discrete `D` (section 2) | `mu` family indexed by `F`: `mkAgg F L p` with `L : Tally -> Decision`, `p : (x : Config) -> EqDec (F x) (L (orbit x))`; field `rule F L` (probe-forced, O10) |
 | `IsSelfConstituting F` | the fixed-point predicate (section 3) | `(L : Aggregation F) * ((x : Config) -> EqDec (gov F L x) (F x))` |
@@ -141,12 +143,35 @@ Each core type is in `Type 0`. The meaning column cites the design.
 `sub l p n h` takes an erased proof `0 h : Le n (balance l p)`.
 Subtraction in a cancellative monoid is defined only below the balance.
 
-The prelude defines `tallyOf` (by `foldBallots`), `total` and `orbit :
-Config -> Tally`. `Config` states `total (tallyOf xs) = members`, so
-`orbit` reuses that proof: `orbit (mkConfig xs e) = mkTally (tallyOf xs) e`. A proof of `total (tallyOf xs) = length xs` for an open `xs`
-is not possible: `natAdd` reduces only on literals (probe-forced). `orbit` is the orbit projection. The member relabeling group is the
-symmetric group on `members`. Its orbits are tallies. This choice of `act` is
-mine; the design keeps `act` abstract (open item O2).
+The prelude defines `tallyOf` (by `foldBallots`), `total`, `classTallyOf`,
+`totals` and `orbit : Config -> Tally`. `classTallyOf memberClasses xs`
+gives one count triple for each class. `Config` states
+`totals (classTallyOf memberClasses xs) = members`, so `orbit` reuses that
+proof: `orbit (mkConfig xs e) = mkTally (classTallyOf memberClasses xs) e`.
+A proof of `total (tallyOf xs) = length xs` for an open `xs` is not
+possible: `natAdd` reduces only on literals (probe-forced). `orbit` is the
+orbit projection onto valid class tallies. The source `Tally` constructor
+checks only `totals ts = members`; it does not check the number of triples
+or each class total. For classes `(2, 1)`, for example,
+`mkTally (tcons (tuple (3, tuple (0, 0))) tnil) (reflNat 3)` checks but is
+not the orbit of any configuration. The table enumerates only valid class
+tallies, with one triple per class and that class's total.
+
+A program can declare `def memberClasses : Classes := kcons k_1 (kcons k_2
+knil)` (any number of sizes) as its second definition, just after
+`members`. The sizes give the classes in member order: members 1 to k_1
+are class 1, and so on. `escrowc` checks this declaration in the prelude,
+just after the family `Classes`, because `Config` uses it. Each size must
+not be 0 (`REFUSE_CLASS_ZERO`), and the sum of the sizes must be `members`
+(`REFUSE_CLASS_SUM`). A program without the declaration has one class of
+all members (`kcons members knil`). Its table and its compiled output do
+not change.
+
+The member relabeling group `act` is the product of the symmetric groups
+on the classes (M6). Its orbits are class tallies: one count triple for
+each class. At one class, `act` is the symmetric group on `members`. This
+choice of `act` is mine; the design keeps `act` abstract (open items O2
+and O14). `act` does not act on decisions.
 
 ### 4.1 The aggregation at a discrete decision space
 
@@ -156,9 +181,15 @@ each orbit. `desc`, `fac` and `uniq` follow from the unit and from a section
 of `orbit`. They are theorems, not data. Thus `Aggregation F` is the Sigma in
 the table: an orbit rule `L` and a proof that `F` factors through it.
 
-Three facts follow, and the prelude states them:
+For M6, these quotient claims apply to the image of `orbit`, not every
+inhabitant of the source `Tally` type (section 4). There is no section of
+`orbit` on that entire type: the unit leaves `L` unconstrained at values
+outside the image. The M5 proof below uses a different, one-class `Tally n`.
 
-- `Aggregation F` has at most one inhabitant up to the values of `L`.
+Three facts follow for the orbit quotient:
+
+- `Aggregation F` has at most one inhabitant up to the values of `L` on
+  the image of `orbit`.
 - `IsSelfConstituting F` holds exactly when `Aggregation F` has an
   inhabitant: `selfConstitutes F L := (L, fun x => symmDec (F x) (gov F L x) (cast F L x))`.
 - `Aggregation F` has an inhabitant exactly when `F` is constant on orbits.
@@ -175,7 +206,10 @@ The M5 proof host proves the claim of section 4.1 (open item O1, CLOSED
 `Ballot`, `Config n`, `Tally n`, the orbit map `orbit n` and its section
 `sec n`. `Decision` has the three outcomes `dyes` (release), `dno` (refund)
 and `dhold` (hold). The proof uses a local record of the left Kan extension,
-not UAT `Aggregation act F`.
+not UAT `Aggregation act F`. The proof covers one class only: `Tally n` is
+one count triple, and the group is the symmetric group on the `n` members.
+The member classes of M6 (section 4) are not in the proof, and M6 does not
+extend it (section 10).
 
 To check the proof, go to the root of the mechanism-lang repository. Join
 `prelude/init.mech` and `examples/escrow-o1/O1.mech` with a newline into one
@@ -235,6 +269,11 @@ claim at index `c`, obtained by `claimAt (claims s) c`.
 has no inhabitant, no program can apply `settle`. This is the empty function
 of design section 3.
 
+`orbit x` is the class tally of section 4. Thus `castOrbit` gives one cast
+for two configurations that differ by a relabeling of members inside each
+class. `canonical` reads only the class tally. Members in different
+classes are not interchangeable.
+
 `propose` has no form in M0. The configuration category is discrete, so the
 only proposals are identities and `propose p ; q` is vacuous (design section
 6).
@@ -253,9 +292,14 @@ only proposals are identities and `propose p ; q` is vacuous (design section
 `escrowc build PROG --runtime -o OUT` writes its runtime code, each as one
 line of lowercase hex with no `0x`. The writer is `src/evm.c` (interface
 `src/evm.h`). Its input is the member count, the regime (section 6) and,
-for Arrow-Debreu, one decision code per tally from the checker (`escrowc
-table`; release 1, refund 2, hold 3; tallies in the order r = 0..n outer,
-f = 0..n-r inner, h = n-r-f).
+for Arrow-Debreu, the class sizes and one decision code per class tally
+from the checker (`escrowc table`; release 1, refund 2, hold 3). Each row
+of the table is one orbit of `act` (section 4). At one class of `n`
+members, the rows are in the order r = 0..n outer, f = 0..n-r inner,
+h = n-r-f, so the table has (n+1)(n+2)/2 rows (120 at 14 members). At
+classes of sizes k_1 to k_m, the rows are class blocks in a mixed radix,
+with class 1 as the outer digit. In each class, r is outer and f is inner.
+The row count is the product of the counts (k_i+1)(k_i+2)/2.
 The Arrow-Debreu input also includes the checked member addresses, in
 list order. The writer embeds them in `vote` and refuses absent, repeated
 or out-of-range addresses with `EVM_ADDRESSES`.
@@ -263,6 +307,14 @@ or out-of-range addresses with `EVM_ADDRESSES`.
 The Arrow-Debreu writer accepts 1 to 14 members (`EVM_LIMIT` outside that
 range). The Arrow-impossibility writer has no verdict table and no
 14-member limit; it accepts the member range of section 2.
+
+Before code generation, `escrowc table` and `escrowc build` check the size
+of an Arrow-Debreu table. First, more than 1000 members gives `TABLE_LIMIT`
+(section 8). Then, at two or more classes, more than 128 rows gives
+`REFUSE_TABLE_SIZE` (M6). `amend` packs 2 bits per row in one word, so 128
+rows is the bound. One class keeps the 1000-member table limit and
+`EVM_LIMIT`. At 14 members, the trivial group (14 classes of one member)
+and each layout of two classes get `REFUSE_TABLE_SIZE`.
 
 - The creation code reverts on a call value and returns the runtime. It
   writes no storage.
@@ -280,7 +332,10 @@ range). The Arrow-impossibility writer has no verdict table and no
 - The orbit rule `witness L` is the verdict table, data in the runtime code
   that `CODECOPY` reads. It is the constitution code of design section 5.
   Each ballot must be 1, 2 or 3, else the call reverts. The counts r of
-  release and f of refund give the tally index.
+  release and f of refund in each class give the tally index, in the row
+  order above. The member-to-class map is static: the code pushes a
+  constant weight for each member. There is no map at run time and no
+  storage for it.
 - `deposit(p, q, n)` is payable. It guards `n <= callvalue` and that `p`
   and `q` are addresses, credits `n` to `p` with an overflow guard, and
   appends the claim. It returns the claim index.
@@ -306,7 +361,8 @@ range). The Arrow-impossibility writer has no verdict table and no
   core escrow state; `vote` changes that context. See design sections 2 and 3
   for its meaning and the core projection.
 - `amend()` takes no argument at the canonical `Phi`. It returns the packed
-  verdict table `sum C_i * 4^i` and writes nothing (O5).
+  verdict table `sum C_i * 4^i` and writes nothing (O5). The table has at
+  most 128 rows, so the result is one word.
 - `withdraw(n)` guards `n <= credit caller`, debits `n` from the credit of
   the caller first, then calls the caller with `n` wei and all the gas. A
   failed call reverts, so the credit does not change. It reads the credit
@@ -369,9 +425,12 @@ facts are in `probe/CAPABILITY.md`.
   the local Kan record, not UAT `Aggregation act F`. Section 4.1 gives the
   three limits of the proof. The old text of O1 is in
   `git show 71d51b1:SPEC.md`.
-- O2. `act` is the symmetric group on members. The design and the DAO
-  example (a `Z2` flip on spins) keep `act` general. M6 (section 10)
-  plans member classes: the symmetric group inside each class.
+- O2. CLOSED 2026-10-09 for member classes by M6 (section 10). `act` is
+  the product of the symmetric groups on the member classes of
+  `def memberClasses` (section 4). A program without the declaration has
+  one class: the symmetric group on members. The design and the DAO
+  example (a `Z2` flip on spins) keep `act` general. An action on the
+  decisions is open item O14.
 - O3. RULED 2026-10-06: `D` stays discrete and the Schelling-Ising row is
   not reachable. The DAO repository finds its fork in the indiscrete target
   `MagPhase`, not a discrete one.
@@ -457,6 +516,11 @@ facts are in `probe/CAPABILITY.md`.
   Thus any caller of `settle` could pick the verdict, for example a payee
   sending `n` release ballots. M4 built the ruling in chunks 1 to 3
   (section 10).
+- O14. OPEN 2026-10-09 (USER ruling at M6 chunk 5: "New open item for an
+  action on decisions"). `act` relabels members only, and `Decision` has
+  no action. The DAO example also flips decisions (a `Z2` flip on spins).
+  escrow-lang has no form for an action on decisions. A design for it
+  needs a USER ruling.
 
 
 ## 10. Milestones
@@ -527,15 +591,24 @@ facts are in `probe/CAPABILITY.md`.
   mechanism-lang commit `2049161` (section 4.1). Rung 4 (Lean 4) was not
   necessary. The failed rungs added no file to escrow-lang. Chunk 5 updates
   section 4.1, O1 and this section.
-- M6: O2, `act` on member classes (USER ruling 2026-10-09). Planned. A
-  program can put its members into classes. `act` is the product of the
-  symmetric groups on the classes, so the tally index is one count pair
-  for each class. A program with no classes has one class: the symmetric
-  group of today. Its table and compiled output do not change. `escrowc`
-  refuses a program whose table makes the runtime larger than the runtime
-  size limit (`EVM_RUNTIME_MAX`, 24576 bytes). Chunk 0 is a read-only
-  probe. The next
-  chunks change the prelude and the checker, `escrowc table`, the runtime
-  in `src/evm.c`, the tests and the documents. The proof of section 4.1
-  (M5) is for one class, and M6 does not extend it. An action on the
-  decisions (the `Z2` flip of the DAO example) is not part of M6.
+- M6: O2, `act` on member classes (USER ruling 2026-10-09). Done
+  (2026-10-09). A program can put its members into classes with
+  `def memberClasses` (section 4). `act` is the product of the symmetric
+  groups on the classes, so the tally index is one count pair for each
+  class. A program without the declaration has one class: the symmetric
+  group of M5. Its table and compiled output do not change. At two or more
+  classes, `escrowc` refuses a table of more than 128 rows before code
+  generation (`REFUSE_TABLE_SIZE`, section 7), so `amend` stays one word.
+  The runtime has a static member-to-class map and no storage for it. The
+  commits: plan `9d6a048`; chunk 1 `a7a3b4b` (member classes, a source
+  tally for each class); chunk 2 `145467e` (decision tables across
+  classes); chunk 3 `03b13ae` (EVM voting and settlement); chunk 4
+  `58b8c6f` (the example `examples/programs/council.esc` and its test
+  rows); chunk 5 the documents (sections 4, 4.1, 5, 7, 9 and this section,
+  and `probe/CAPABILITY.md`). `make test` gives 131 ok.
+  `test/settlement.py` gives `cases=148 deploy=2`. `test/differential.py`
+  checks three programs: `arrow-debreu` and `two-classes` at 27 vectors
+  each, and `council` at 81 vectors. The 14-member build gives 2170 bytes
+  and 120 codes. The proof of section 4.1 (M5) is for one class, and M6
+  does not extend it. An action on the decisions (the `Z2` flip of the DAO
+  example) is not part of M6 (open item O14).
