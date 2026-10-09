@@ -36,6 +36,8 @@ WORK = ROOT / '.gatework/differential'
 PROGRAM = ROOT / 'examples/programs/arrow-debreu.esc'
 # M6 chunk 3 (R15): the runtime of 2 member classes, cast code = escrowc table code.
 TWO_CLASSES = ROOT / 'test/fixtures/two-classes.esc'
+# M6 chunk 4: the council example (classes 2,2), whose codes read the class split.
+COUNCIL = ROOT / 'examples/programs/council.esc'
 CODES = (1, 2, 3)
 DECISIONS = {1: 'release', 2: 'refund', 3: 'hold'}
 PAYER, PAYEE, AMOUNT = 17, 34, 5
@@ -169,7 +171,7 @@ def source_settled(text, size, index, vector):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--program', type=Path, action='append')
-    programs = parser.parse_args().program or [PROGRAM, TWO_CLASSES]
+    programs = parser.parse_args().program or [PROGRAM, TWO_CLASSES, COUNCIL]
     S.require(shutil.which('evm') and shutil.which('cast'), 'evm and cast are required')
     S.require(ESCROWC.exists(), f'{ESCROWC} is missing: run make')
     for program in programs:

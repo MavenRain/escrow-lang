@@ -24,7 +24,7 @@ check() {
 }
 
 # Parse, print, parse the print and print again: the two prints are the same.
-for file in prelude/Prelude.esc examples/programs/arrow-debreu.esc examples/programs/arrow-impossibility.esc test/parser-arms.esc; do
+for file in prelude/Prelude.esc examples/programs/arrow-debreu.esc examples/programs/arrow-impossibility.esc examples/programs/council.esc test/parser-arms.esc; do
   name=$(basename "$file" .esc)
   "$tool" "$root/$file" > "$out/$name.1" 2> "$out/$name.err"
   first=$?

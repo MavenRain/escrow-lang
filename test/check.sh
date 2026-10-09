@@ -72,6 +72,11 @@ refuse "table debreu with 14 members in two classes" REFUSE_TABLE_SIZE memberCla
   table "$root/test/fixtures/two-classes-14.esc"
 refuse "table debreu with 14 classes of one member" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \
   table "$root/test/fixtures/trivial-classes-14.esc"
+# The council example (M6 chunk 4): a board of 2 members and 2 delegates.
+# The board decides unless it holds, so the codes read the class split.
+expect "check council" 0 "ok debreu" check "$programs/council.esc"
+expect "table council" 0 "debreu 4 3 3 2 3 3 1 3 3 2 3 3 1 2 2 2 2 2 2 3 3 2 3 3 1 3 3 2 3 3 1 1 1 1 1 1 1" table "$programs/council.esc"
+expect "verdicts council F" 0 "111111111133323333133323333133323333222222222133323333133323333133323333133323333" verdicts "$programs/council.esc" F
 
 # The class-table cases (M6, before chunk 2 a C harness): H releases iff class 1
 # has 2 release ballots, so source evaluation and the table read the classes.
@@ -146,6 +151,11 @@ refuse "mutant mkAgg first at the constant rule" TYPE_MISMATCH agg \
 refuse "mutant mkAgg first with proof reflDec (first x)" TYPE_MISMATCH agg \
   ", found EqDec (foldBallots Decision (fun (escrowq1x0 : Decision) (escrowq2x0 : Decision) => escrowq1x0) hold (match escrowq0x0 as escrowq1x0 in Config return Ballots with | mkConfig escrowq1x0 escrowq2x0 => escrowq1x0)) (foldBallots Decision (fun (escrowq1x0 : Decision) (escrowq2x0 : Decision) => escrowq1x0) hold (match escrowq0x0 as escrowq1x0 in Config return Ballots with | mkConfig escrowq1x0 escrowq2x0 => escrowq1x0))" \
   check "$root/test/mutants/impossibility-agg-refl.esc"
+# council.esc with member 2 moved to the delegates (classes 1,3): the board
+# of x is refund alone, so the verdict release of verdictX does not check.
+refuse "mutant council member 2 in class 2" TYPE_MISMATCH verdictX \
+  "the types differ: expected EqDec refund release, found EqDec release release" \
+  check "$root/test/mutants/council-class-move.esc"
 refuse "verdicts of a name that is not a ChoiceRule" VERDICT_TYPE agg "agg is not a ChoiceRule" \
   verdicts "$programs/arrow-debreu.esc" agg
 refuse "eval of an unknown name" TYPE_SCOPE nothing "nothing is not declared" \

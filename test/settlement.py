@@ -22,6 +22,9 @@ GENESIS = dict(config=CONFIG, coinbase='0x' + '00' * 20, difficulty='0x0', gasLi
                nonce='0x0000000000000000', timestamp='0x0', number='0x0',
                excessBlobGas='0x0', blobGasUsed='0x0')
 CODES = (3, 3, 2, 2, 3, 3, 2, 1, 1, 1)
+# M6 chunk 4: the escrowc table of examples/programs/council.esc (classes 2,2, 36 rows).
+COUNCIL_CODES = (3, 3, 2, 3, 3, 1, 3, 3, 2, 3, 3, 1, 2, 2, 2, 2, 2, 2,
+                 3, 3, 2, 3, 3, 1, 3, 3, 2, 3, 3, 1, 1, 1, 1, 1, 1, 1)
 LEDGER, COUNT, PAYER, PAYEE, AMOUNT, CREDIT, CLOSED, BALLOTS = range(8)
 # M4: the members of the n = 3 build are the addresses of the private keys
 # 1, 2 and 3 (SENDER is member 0). The address of key 4 is not a member.
@@ -427,14 +430,18 @@ def main():
     # M4 R6: Arrow-impossibility has no vote entry.
     expect('impossibility-vote', impossible, data('vote', 0, 1), ready, ready, None)
     cases += 3
-    for members, codes, vectors in (
-            (1, (3, 2, 1), [(1,), (2,), (3,)]),
-            (14, tuple(i % 3 + 1 for i in range(120)),
-             [tuple((m * k) % 3 + 1 for m in range(14)) for k in range(5)] + [(1,) * 14, (2,) * 14])):
-        code = bytecode('runtime', members, 'debreu', *codes, *addresses(members))
+    # The class sizes go to evmtool as K1,K2,... (M6); one class is the member count.
+    for classes, codes, vectors in (
+            ((1,), (3, 2, 1), [(1,), (2,), (3,)]),
+            ((14,), tuple(i % 3 + 1 for i in range(120)),
+             [tuple((m * k) % 3 + 1 for m in range(14)) for k in range(5)] + [(1,) * 14, (2,) * 14]),
+            ((2, 2), COUNCIL_CODES,
+             [(1, 1, 2, 2), (2, 2, 1, 1), (2, 1, 1, 1), (1, 3, 2, 2), (1, 2, 1, 2), (3, 3, 3, 3)])):
+        members, name = sum(classes), ','.join(map(str, classes))
+        code = bytecode('runtime', name, 'debreu', *codes, *addresses(members))
         for k, ballots in enumerate(vectors):
-            decision = verdict(members, codes, ballots)
-            expect(f'cast-n{members}-{k}', code, data('cast', *ballots), {}, {},
+            decision = verdict(members, codes, ballots, classes)
+            expect(f'cast-n{name}-{k}', code, data('cast', *ballots), {}, {},
                    decision)
             before = voted({COUNT: 1, slot(PAYER, 0): 17, slot(PAYEE, 0): 34,
                             slot(AMOUNT, 0): 5, slot(LEDGER, 17): 20}, 0, ballots)
@@ -443,16 +450,16 @@ def main():
                 after[slot(LEDGER, 17)] = 15
                 after[slot(CREDIT, 34 if decision == 1 else 17)] = 5
                 after[slot(CLOSED, 0)] = 1
-            expect(f'settle-n{members}-{k}', code, data('settle', 0), before, after, decision)
+            expect(f'settle-n{name}-{k}', code, data('settle', 0), before, after, decision)
             cases += 2
         for m, member in enumerate(addresses(members)):
             mark = slot(BALLOTS, 0)
             others = pack((3,) * members) - 3 * 4**m
             new = others + (m % 3 + 1) * 4**m
-            expect(f'vote-n{members}-{m}', code, data('vote', 0, m % 3 + 1),
+            expect(f'vote-n{name}-{m}', code, data('vote', 0, m % 3 + 1),
                    {COUNT: 1, mark: others}, {COUNT: 1, mark: new}, new, caller=member[2:])
             cases += 1
-        expect(f'amend-n{members}', code, data('amend'), {}, {}, pack(codes))
+        expect(f'amend-n{name}', code, data('amend'), {}, {}, pack(codes))
         cases += 1
     print(f'SETTLEMENT cases={cases} deploy=2 geth=expected OK (logs: {WORK})')
 

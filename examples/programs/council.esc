@@ -1,0 +1,86 @@
+def members : Nat := 4
+def memberClasses : Classes := kcons 2 (kcons 2 knil)
+-- A council with two member classes (M6).  Members 1 and 2 are the board
+-- (class 1), and members 3 and 4 are the delegates (class 2).  The regime
+-- is Arrow-Debreu (SPEC section 6): the constitution factors through
+-- `orbit`, and `orbit` is the tally of each class.  `plural` is plurality
+-- by `natLt`: a strict maximum wins, and a tie holds.  `c` is the count
+-- triple (release, refund, hold).
+def plural : T3 -> Decision := fun (c : T3) =>
+  case natLt c.1.0 c.0 with
+  | 0 (u : prod ()) =>
+    (case natLt c.0 c.1.0 with
+     | 0 (v : prod ()) => hold
+     | 1 (v : prod ()) =>
+       (case natLt c.1.1 c.1.0 with
+        | 0 (w : prod ()) => hold
+        | 1 (w : prod ()) => refund))
+  | 1 (u : prod ()) =>
+    (case natLt c.1.1 c.0 with
+     | 0 (v : prod ()) => hold
+     | 1 (v : prod ()) => release)
+
+-- The board decides if its plurality is release or refund.  If the board
+-- holds, the plurality of the delegates decides.  `ts` is the tally of each
+-- class, in class order.
+def orNext : Decision -> Decision -> Decision := fun (d : Decision) (next : Decision) =>
+  match d as w in Decision return Decision with
+  | release => release
+  | refund => refund
+  | hold => next
+def chambers : Tallies -> Decision := fun (ts : Tallies) =>
+  match ts as w in Tallies return Decision with
+  | tnil => hold
+  | tcons t rest =>
+    orNext (plural t)
+      (match rest as v in Tallies return Decision with
+       | tnil => hold
+       | tcons t2 rest2 => plural t2)
+def H : Tally -> Decision := fun (t : Tally) => chambers (classCounts t)
+
+def F : ChoiceRule := fun (x : Config) => H (orbit x)
+def agg : Aggregation F := mkAgg F H (fun (x : Config) => reflDec (H (orbit x)))
+
+-- cast: two configurations in one orbit give one verdict.  The board of
+-- `x` votes refund and release, so the board holds and the delegates
+-- (release, release) decide release.  `y` swaps the two board ballots, so
+-- `y` is in the orbit of `x`.
+def xs : Ballots := bcons refund (bcons release (bcons release (bcons release bnil)))
+def x : Config := mkConfig xs (reflNat 4)
+def ys : Ballots := bcons release (bcons refund (bcons release (bcons release bnil)))
+def y : Config := mkConfig ys (reflNat 4)
+def castX : EqDec (F x) (gov F agg x) := cast F agg x
+def verdictX : EqDec (gov F agg x) release := reflDec release
+def sameOrbit : EqTally (orbit x) (orbit y) := reflTally (orbit x)
+def castXY : EqDec (gov F agg x) (gov F agg y) := castOrbit F agg x y sameOrbit
+
+-- amend at the canonical amendment rule.
+def G : ChoiceRule := amend canonical F agg
+def homX : EqDec (G x) (gov F agg x) := homAmend F agg x
+def aggGov : Aggregation (gov F agg) := reconstitute F agg
+def selfF : IsSelfConstituting F := selfConstitutes F agg
+
+-- Scenario (refl candidates): one deposit of 5 from address 1 to address
+-- 2, then settle claim 0 at the release verdict of `x`.  The release
+-- moves the amount to the credit of the payee and closes the claim.
+def start : Escrow := tuple (empty, tuple (empty, tuple (cnil, allOpen)))
+def s1 : Escrow := deposit 1 2 5 start
+def hc1 : Lt 0 (claimCount (claims s1)) := (0, reflNat 1)
+def ho1 : EqNat (closed s1 0) 0 := reflNat 0
+def h1 : Le 5 (balance (ledger s1) 1) := (0, reflNat 5)
+def s2 : Escrow := settle F agg x 0 s1 hc1 ho1 h1
+def payerAfterSettle : EqNat (balance (ledger s2) 1) 0 := reflNat 0
+def payeeAfterSettle : EqNat (balance (credit s2) 2) 5 := reflNat 5
+def openAfterSettle : EqNat (openCount s2) 0 := reflNat 0
+def h3 : Le 5 (balance (credit s2) 2) := (0, reflNat 5)
+def s3 : Escrow := withdraw 2 5 s2 h3
+def creditAfterWithdraw : EqNat (balance (credit s3) 2) 0 := reflNat 0
+def dao : EscrowDAO F := (agg, s2)
+
+-- The member addresses (M4): one distinct address below 2^160 for each
+-- member, in member order.
+def memberAddresses : Addresses :=
+  acons 0x1000000000000000000000000000000000000001
+    (acons 0x2000000000000000000000000000000000000002
+      (acons 0x3000000000000000000000000000000000000003
+        (acons 0x4000000000000000000000000000000000000004 anil)))
