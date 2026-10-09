@@ -23,18 +23,14 @@ build/escrowc: $(ESCROWC) $(HEADERS) build/prelude.c
 build/parsetool: $(FRONT) test/parsetool.c $(HEADERS) build/prelude.c
 	$(TCC) $(TCCFLAGS) -o $@ $(FRONT) test/parsetool.c build/prelude.c
 
-build/class-table-test: $(FRONT) src/check.c test/class-table.c $(HEADERS) build/prelude.c
-	$(TCC) $(TCCFLAGS) -o $@ $(FRONT) src/check.c test/class-table.c build/prelude.c
-
 check-clang: build/prelude.c
 	$(CLANG) $(CLANGFLAGS) src/*.c test/*.c tools/*.c build/prelude.c
 
-test: build/escrowc build/parsetool build/class-table-test
+test: build/escrowc build/parsetool
 	sh test/parse.sh
 	sh test/check.sh
 	sh test/refusal.sh
 	python3 test/normal-forms.py
-	build/class-table-test
 
 clean:
 	rm -rf build

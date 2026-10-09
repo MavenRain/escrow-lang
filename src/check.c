@@ -16,6 +16,7 @@ enum {
   CHECK_DEPTH = 4096,    /* nested eval, apply, conv, quote, check and infer calls; tcc on an 8 MB stack crashed between 12288 and 16384 (10-07) */
   VERDICT_MAX = 10,      /* members of verdicts: 3^10 ballot vectors */
   TABLE_MAX = 1000,      /* members of table */
+  TABLE_ROWS = 128,      /* rows of a table with multiple member classes (M6 R6) */
   SINK_BYTES = 8192      /* the allocations after a MEMORY error land here */
 };
 
@@ -1521,11 +1522,44 @@ static int decision_code(C *c, const Value *d, const char *what) {
   return ok ? (int)d->global->index + 1 : 0;
 }
 
-static int tally_code(C *c, unsigned long long r, unsigned long long f, unsigned long long h) {
+/* M6 (R11): table rows are class blocks in a mixed radix.  Class 1 is the
+ * outer digit, and each class lists its tallies r outer, f inner.  A class
+ * of k members has (k+1)(k+2)/2 rows. */
+static int multiple_classes(const Value *v) {
+  return is_kcons(v) && is_kcons(v->args[1]);
+}
+
+static size_t class_rows(unsigned long long k) {
+  return (size_t)((k + 1) * (k + 2) / 2);
+}
+
+/* The row product of the classes from v on, or TABLE_ROWS + 1 when the
+ * product is more than TABLE_ROWS. */
+static size_t rows_from(const Value *v) {
+  size_t rows = 1;
+  for (; is_kcons(v); v = v->args[1]) {
+    size_t k = class_rows(v->args[0]->nat);
+    rows = k > TABLE_ROWS || rows * k > TABLE_ROWS ? TABLE_ROWS + 1 : rows * k;
+  }
+  return rows;
+}
+
+/* The class tallies of table row i: a class takes the digit i / s % rows,
+ * where s is the row product of the classes after it. */
+static Value *row_classes(C *c, const Value *v, size_t i) {
+  if (!is_kcons(v))
+    return global_value(c, "tnil");
+  unsigned long long k = v->args[0]->nat, r = 0;
+  unsigned long long f = i / rows_from(v->args[1]) % class_rows(k);
+  for (; f > k - r; r++)
+    f -= k - r + 1;
+  Value *counts = mk_two(c, V_TUPLE, mk_nat(c, r), mk_two(c, V_TUPLE, mk_nat(c, f), mk_nat(c, k - r - f)));
+  return ctor2(c, "tcons", counts, row_classes(c, v->args[1], i));
+}
+
+static int tally_code(C *c, const Value *classes, size_t i) {
   c->fuel = CHECK_FUEL;
-  Value *counts = mk_two(c, V_TUPLE, mk_nat(c, r), mk_two(c, V_TUPLE, mk_nat(c, f), mk_nat(c, h)));
-  Value *classes = ctor2(c, "tcons", counts, global_value(c, "tnil"));
-  Value *tally = ctor2(c, "mkTally", classes, refl_members(c));
+  Value *tally = ctor2(c, "mkTally", row_classes(c, classes, i), refl_members(c));
   Value *rule = apply(c, apply(c, global_value(c, "rule"), c->rule->value), c->agg->value);
   return decision_code(c, apply(c, rule, tally), "rule G agg (mkTally ...)");
 }
@@ -1537,25 +1571,32 @@ int escrow_table(EscrowChecked *c, const unsigned char **codes, size_t *count) {
     return ESCROW_EXIT_REFUSED;
   if (c->regime == ESCROW_REGIME_IMPOSSIBILITY)
     return ESCROW_EXIT_OK;
-  /* The current table and runtime index only a single class tally. */
-  const Value *classes = global_value(c, "memberClasses");
-  if (is_kcons(classes) && is_kcons(classes->args[1]))
-    return refuse(c, "REFUSE_CLASS_TABLE", "memberClasses",
-                  "tables and runtime compilation currently require one member class");
   size_t n = c->members;
   if (n > TABLE_MAX)
     return refuse(c, "TABLE_LIMIT", "members", "is too large for a table");
-  size_t total = (n + 1) * (n + 2) / 2;
+  /* M6 (R6, R13): amend packs 2 bits per row in one word, so multiple
+   * classes give at most TABLE_ROWS rows.  One class keeps TABLE_MAX here
+   * and EVM_LIMIT at build. */
+  const Value *classes = global_value(c, "memberClasses");
+  int multiple = multiple_classes(classes);
+  size_t total = multiple ? rows_from(classes) : (n + 1) * (n + 2) / 2;
+  if (multiple && total > TABLE_ROWS)
+    return refuse(c, "REFUSE_TABLE_SIZE", "memberClasses", "give more than 128 table rows");
   unsigned char *out = arena_alloc(c->arena, total);
   if (out == NULL)
     return refuse(c, "MEMORY", "table", "does not fit in the arena");
-  size_t k = 0;
-  for (size_t r = 0; r <= n; r++)
-    for (size_t f = 0; r + f <= n; f++)
-      out[k++] = (unsigned char)tally_code(c, r, f, n - r - f);
+  for (size_t i = 0; i < total; i++)
+    out[i] = (unsigned char)tally_code(c, classes, i);
   *codes = out;
   *count = total;
   return c->failed ? ESCROW_EXIT_REFUSED : ESCROW_EXIT_OK;
+}
+
+/* M6 (R12): src/evm.c indexes one class tally until M6 chunk 3. */
+int escrow_build_classes(EscrowChecked *c) {
+  if (c->regime == ESCROW_REGIME_DEBREU && multiple_classes(global_value(c, "memberClasses")))
+    return refuse(c, "REFUSE_CLASS_TABLE", "memberClasses", "has multiple classes, and a build supports one class");
+  return ESCROW_EXIT_OK;
 }
 
 int escrow_addresses(EscrowChecked *c, const unsigned char **addresses) {

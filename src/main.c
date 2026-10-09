@@ -73,6 +73,9 @@ static int verb_build(EscrowChecked *checked, Diag *diag, int argc, char **argv)
   int status = escrow_table(checked, &contract.codes, &contract.count);
   if (status != ESCROW_EXIT_OK)
     return status;
+  status = escrow_build_classes(checked);
+  if (status != ESCROW_EXIT_OK)
+    return status;
   status = escrow_addresses(checked, &contract.addresses);
   if (status != ESCROW_EXIT_OK)
     return status;

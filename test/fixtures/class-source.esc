@@ -1,0 +1,14 @@
+-- test/check.sh: the class-table cases. A case writes `def members : Nat := 3`,
+-- its memberClasses line, and then this file.
+def firstCounts : Tallies -> T3 := fun (ts : Tallies) =>
+  match ts as w in Tallies return T3 with
+  | tnil => tuple (0, tuple (0, 0))
+  | tcons t rest => t
+def H : Tally -> Decision := fun (t : Tally) =>
+  case natEq (firstCounts (classCounts t)).0 2 with
+  | 0 (u : prod ()) => refund
+  | 1 (u : prod ()) => release
+def F : ChoiceRule := fun (x : Config) => H (orbit x)
+def agg : Aggregation F := mkAgg F H (fun (x : Config) => reflDec (H (orbit x)))
+def x : Config := mkConfig (bcons release (bcons refund (bcons release bnil))) (reflNat 3)
+def sourceVerdict : Decision := gov F agg x

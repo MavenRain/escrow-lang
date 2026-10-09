@@ -64,6 +64,37 @@ expect "check impossibility with memberAddresses" 0 "ok impossibility" \
 # fixture) still checks.
 expect "check debreu with two member classes" 0 "ok debreu" \
   check "$root/test/fixtures/two-classes.esc"
+# The table is the product of the class rows, class 1 the outer digit (M6
+# chunk 2). Above 128 rows, table refuses REFUSE_TABLE_SIZE.
+expect "table debreu with two member classes" 0 "debreu 3 3 3 3 3 2 3 2 2 2 3 3 1 3 2 1 1 1 1" \
+  table "$root/test/fixtures/two-classes.esc"
+refuse "table debreu with 14 members in two classes" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \
+  table "$root/test/fixtures/two-classes-14.esc"
+refuse "table debreu with 14 classes of one member" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \
+  table "$root/test/fixtures/trivial-classes-14.esc"
+
+# The class-table cases (M6, before chunk 2 a C harness): H releases iff class 1
+# has 2 release ballots, so source evaluation and the table read the classes.
+# class_case NAME LINE...: $out/class-NAME.esc is `def members : Nat := 3`,
+# the lines LINE..., and then test/fixtures/class-source.esc.
+class_case() {
+  name=$1
+  shift
+  { printf '%s\n' 'def members : Nat := 3' "$@"; cat "$root/test/fixtures/class-source.esc"; } > "$out/class-$name.esc"
+}
+class_case default
+class_case one 'def memberClasses : Classes := kcons 3 knil'
+class_case two 'def memberClasses : Classes := kcons 2 (kcons 1 knil)'
+class_case three 'def memberClasses : Classes := kcons 1 (kcons 1 (kcons 1 knil))'
+expect "eval class default sourceVerdict" 0 "release" eval "$out/class-default.esc" sourceVerdict
+expect "eval class one sourceVerdict" 0 "release" eval "$out/class-one.esc" sourceVerdict
+expect "eval class two sourceVerdict" 0 "refund" eval "$out/class-two.esc" sourceVerdict
+expect "eval class three sourceVerdict" 0 "refund" eval "$out/class-three.esc" sourceVerdict
+expect "table class default" 0 "debreu 3 2 2 2 2 2 2 2 1 1 2" table "$out/class-default.esc"
+expect "table class one" 0 "debreu 3 2 2 2 2 2 2 2 1 1 2" table "$out/class-one.esc"
+expect "table class two" 0 "debreu 3 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 1 1 1" table "$out/class-two.esc"
+expect "table class three" 0 "debreu 3 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2" \
+  table "$out/class-three.esc"
 
 # Erased Sigma fields may be constructed from erased variables and used
 # in types, while the second field remains available at run time.
