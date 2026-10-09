@@ -1,6 +1,6 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M4 (ballots on chain, all three chunks done; section 10).
+Status: draft, milestone M5 (O1, a proof of section 4.1; planned, section 10).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -167,8 +167,8 @@ A constitution of the form `fun x => H (orbit x)` has the aggregation
 aggregation that a program can write. That program is in the
 Arrow-impossibility regime.
 
-The claim of section 4.1 is a design fact that the Lean side must prove. It
-is not proved here (open item O1).
+The claim of section 4.1 is a design fact that the M5 proof host must prove
+(section 10). It is not proved here (open item O1).
 
 ## 5. Core operations
 
@@ -319,8 +319,10 @@ facts are in `probe/CAPABILITY.md`.
 
 ## 9. Open items
 
-- O1. Prove section 4.1 in Lean against `self-referential-dao` and UAT: at a
-  discrete `D`, `Aggregation act F` is equivalent to the Sigma of section 4.
+- O1. Prove section 4.1 using the M5 proof-host order (section 10): at a
+  discrete `D`, the left Kan extension is equivalent to the Sigma of section 4.
+  Use UAT `Aggregation act F` where available, or the local Kan record
+  described in M5 on a host without UAT.
 - O2. `act` is the symmetric group on members. The design and the DAO
   example (a `Z2` flip on spins) keep `act` general.
 - O3. RULED 2026-10-06: `D` stays discrete and the Schelling-Ising row is
@@ -457,3 +459,12 @@ facts are in `probe/CAPABILITY.md`.
   documents: this section, design sections 3 and 5 (O5 and O6 CLOSED) and
   `probe/CAPABILITY.md`.
   `make test` gives 106 ok.
+- M5: O1, a proof of section 4.1 (USER ruling 2026-10-08). Planned. The
+  proof host is the first of these that can state and check all of O1:
+  escrow-lang (`proofs/O1.esc`), Bend 2 (`bend/O1.bend`), mechanism-lang
+  (an example program in that repository) or Lean 4 (a module in
+  `self-referential-dao`). On a host without UAT, the left side of the
+  equivalence is a local record of the left Kan extension at a discrete
+  `D` (`L`, the unit, `desc`, `fac` and `uniq`). Chunk 0 adds a test row
+  that reaches `REFUSE_ADDRESSES`. The last chunk updates section 4.1 and
+  O1.
