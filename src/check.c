@@ -1592,10 +1592,25 @@ int escrow_table(EscrowChecked *c, const unsigned char **codes, size_t *count) {
   return c->failed ? ESCROW_EXIT_REFUSED : ESCROW_EXIT_OK;
 }
 
-/* M6 (R12): src/evm.c indexes one class tally until M6 chunk 3. */
-int escrow_build_classes(EscrowChecked *c) {
-  if (c->regime == ESCROW_REGIME_DEBREU && multiple_classes(global_value(c, "memberClasses")))
-    return refuse(c, "REFUSE_CLASS_TABLE", "memberClasses", "has multiple classes, and a build supports one class");
+int escrow_classes(EscrowChecked *c, const unsigned **sizes, size_t *count) {
+  *sizes = NULL;
+  *count = 0;
+  if (c->failed)
+    return ESCROW_EXIT_REFUSED;
+  if (c->regime == ESCROW_REGIME_IMPOSSIBILITY)
+    return ESCROW_EXIT_OK;
+  const Value *classes = global_value(c, "memberClasses");
+  size_t total = 0;
+  for (const Value *v = classes; is_kcons(v); v = v->args[1])
+    total++;
+  unsigned *out = arena_alloc(c->arena, total * sizeof *out);
+  if (out == NULL)
+    return refuse(c, "MEMORY", "memberClasses", "does not fit in the arena");
+  size_t i = 0;
+  for (const Value *v = classes; is_kcons(v); v = v->args[1])
+    out[i++] = (unsigned)v->args[0]->nat;
+  *sizes = out;
+  *count = total;
   return ESCROW_EXIT_OK;
 }
 

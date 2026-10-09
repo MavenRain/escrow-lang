@@ -11,7 +11,11 @@
  * Arrow-Debreu: the orbit rule is a byte table at the end of the runtime
  * code, read with CODECOPY, so no entry can write it. Ballot codes 1, 2
  * and 3 weigh 1, members + 1 and 0, and the sum of the weights,
- * r + (members + 1) f, indexes the table of decision codes. The member
+ * r + (members + 1) f, indexes the table of decision codes. With member
+ * classes (M6), a member of class c with k_c members weighs s_c and
+ * s_c (k_c + 1), where s_c is the product of k (k + 1) + 1 over the later
+ * classes, so the table is a mixed radix of one digit per class (one class
+ * is the case s = 1). The weights are PUSH constants per member. The member
  * addresses are PUSH20 constants of the vote entry (M4 R2).
  *
  * Every failure is REVERT with empty output: a short calldata, an unknown
@@ -27,7 +31,10 @@ enum {
   EVM_FIXUPS = 512,
   EVM_RUNTIME_MAX = 24576,  /* EIP-170 */
   EVM_DEBREU_MAX = 14,      /* amend packs 2 bits per tally into one word */
-  EVM_TABLE_MAX = EVM_DEBREU_MAX * (EVM_DEBREU_MAX + 1) + 1,
+  EVM_ROWS_MAX = 128,       /* amend packs 2 bits per row into one word (M6 R6) */
+  /* Table bytes: one class of 14 gives 211; classes (5, 2) give 31 * 7 = 217,
+   * the most for 14 members or fewer and EVM_ROWS_MAX rows or fewer. */
+  EVM_TABLE_MAX = 217,
   EVM_SIGNATURE = 256
 };
 
@@ -324,9 +331,77 @@ static void table_code(Asm *a) {
   op(a, OP_SHR);
 }
 
+/* The member classes of a checked Debreu contract (M6). Class c has k[c]
+ * members, (k + 1)(k + 2)/2 rows and k (k + 1) + 1 table bytes. Class 0 is
+ * the outer digit of the row and of the table byte, as in escrowc table. */
+typedef struct {
+  size_t count;
+  size_t k[EVM_DEBREU_MAX];
+  size_t row_stride[EVM_DEBREU_MAX];  /* the row product of the later classes */
+  size_t byte_stride[EVM_DEBREU_MAX]; /* the byte product of the later classes */
+  size_t class_of[EVM_DEBREU_MAX];    /* member -> class */
+  size_t rows;
+  size_t bytes;
+} Classes;
+
+/* contract->classes, or one class of all members when it is NULL. The class
+ * sizes must be checked first (check_classes). */
+static void classes_of(const EscrowContract *contract, Classes *out) {
+  int one = contract->classes == NULL;
+  out->count = one ? 1 : contract->nclasses;
+  out->rows = 1;
+  out->bytes = 1;
+  for (size_t c = out->count; c-- > 0;) {
+    size_t k = one ? contract->members : contract->classes[c];
+    out->k[c] = k;
+    out->row_stride[c] = out->rows;
+    out->byte_stride[c] = out->bytes;
+    out->rows *= (k + 1) * (k + 2) / 2;
+    out->bytes *= k * (k + 1) + 1;
+  }
+  size_t member = 0;
+  for (size_t c = 0; c < out->count; c++)
+    for (size_t j = 0; j < out->k[c]; j++)
+      out->class_of[member++] = c;
+}
+
+/* The table byte of row i: class c takes the row digit i / s % rows (s the
+ * row product of the later classes), the digit names the tally (r, f) in r
+ * outer, f inner order, and the class adds its byte stride times
+ * r + (k + 1) f. */
+static size_t row_byte(const Classes *classes, size_t i) {
+  size_t byte = 0;
+  for (size_t c = 0; c < classes->count; c++) {
+    size_t k = classes->k[c], r = 0;
+    size_t f = i / classes->row_stride[c] % ((k + 1) * (k + 2) / 2);
+    for (; f > k - r; r++)
+      f -= k - r + 1;
+    byte += classes->byte_stride[c] * (r + (k + 1) * f);
+  }
+  return byte;
+}
+
+/* top -> top * weight. Weight 1 gives no code, so one class keeps its bytes. */
+static void scale(Asm *a, size_t weight) {
+  if (weight != 1) {
+    push(a, weight);
+    op(a, OP_MUL);
+  }
+}
+
+/* The weights of member m: a release ballot adds s, a refund ballot s (k + 1). */
+static size_t release_weight(const Classes *classes, unsigned m) {
+  return classes->byte_stride[classes->class_of[m]];
+}
+
+static size_t refund_weight(const Classes *classes, unsigned m) {
+  size_t c = classes->class_of[m];
+  return classes->byte_stride[c] * (classes->k[c] + 1);
+}
+
 /* The decision code of the ballots in calldata words first .. first + n - 1.
  * Each ballot must be 1, 2 or 3. */
-static void tally(Asm *a, unsigned first, unsigned members) {
+static void tally(Asm *a, unsigned first, unsigned members, const Classes *classes) {
   op(a, OP_PUSH0);
   for (unsigned m = 0; m < members; m++) {
     argument(a, first + m);
@@ -340,10 +415,11 @@ static void tally(Asm *a, unsigned first, unsigned members) {
     op(a, OP_DUP1);
     push(a, 1);
     op(a, OP_EQ);
+    scale(a, release_weight(classes, m));
     op(a, OP_SWAP1);
     push(a, 2);
     op(a, OP_EQ);
-    push(a, members + 1ul);
+    push(a, refund_weight(classes, m));
     op(a, OP_MUL);
     op(a, OP_ADD);
     op(a, OP_ADD);
@@ -353,7 +429,7 @@ static void tally(Asm *a, unsigned first, unsigned members) {
 
 /* word -> the decision code of the ballots in the fields of word (M4 R5).
  * Reverts when a field is 0 (a member has no ballot). */
-static void stored_tally(Asm *a, unsigned members) {
+static void stored_tally(Asm *a, unsigned members, const Classes *classes) {
   op(a, OP_PUSH0);
   for (unsigned m = 0; m < members; m++) {
     op(a, OP_DUP2);
@@ -367,10 +443,11 @@ static void stored_tally(Asm *a, unsigned members) {
     op(a, OP_DUP1);
     push(a, 1);
     op(a, OP_EQ);
+    scale(a, release_weight(classes, m));
     op(a, OP_SWAP1);
     push(a, 2);
     op(a, OP_EQ);
-    push(a, members + 1ul);
+    push(a, refund_weight(classes, m));
     op(a, OP_MUL);
     op(a, OP_ADD);
     op(a, OP_ADD);
@@ -381,9 +458,9 @@ static void stored_tally(Asm *a, unsigned members) {
 }
 
 /* cast x: the decision of the ballots. It writes nothing. */
-static void cast(Asm *a, unsigned members) {
+static void cast(Asm *a, unsigned members, const Classes *classes) {
   entry(a, LABEL_CAST, members, ENTRY_NONPAYABLE);
-  tally(a, 0, members);
+  tally(a, 0, members, classes);
   return_top(a);
 }
 
@@ -506,13 +583,13 @@ static void vote(Asm *a, unsigned members, const unsigned char *addresses) {
  * ledger of the payer to the credit of the payee, refund to the credit of
  * the payer (SPEC O7). Release and refund close claim c, hold leaves it
  * open and the ballots stay. Any caller can settle. */
-static void settle(Asm *a, unsigned members) {
+static void settle(Asm *a, unsigned members, const Classes *classes) {
   entry(a, LABEL_SETTLE, 1, ENTRY_NONPAYABLE);
   open_guard(a);
   argument(a, 0);
   slot(a, SLOT_BALLOTS);
   op(a, OP_SLOAD);
-  stored_tally(a, members);
+  stored_tally(a, members, classes);
   store(a, MEM_DECISION);
   argument(a, 0);
   slot(a, SLOT_PAYER);
@@ -602,16 +679,14 @@ static void runtime_impossibility(Asm *a) {
 
 static void runtime_debreu(Asm *a, const EscrowContract *contract) {
   unsigned n = contract->members;
+  Classes classes;
+  classes_of(contract, &classes);
   unsigned char table[EVM_TABLE_MAX] = {0};
   unsigned char packed[32] = {0};
-  size_t i = 0;
-  for (unsigned r = 0; r <= n; r++) {
-    for (unsigned f = 0; r + f <= n; f++) {
-      unsigned code = contract->codes[i];
-      table[r + (n + 1) * f] = (unsigned char)code;
-      packed[31 - (2 * i) / 8] |= (unsigned char)(code << ((2 * i) % 8));
-      i++;
-    }
+  for (size_t i = 0; i < classes.rows; i++) {
+    unsigned code = contract->codes[i];
+    table[row_byte(&classes, i)] = (unsigned char)code;
+    packed[31 - (2 * i) / 8] |= (unsigned char)(code << ((2 * i) % 8));
   }
   dispatch_head(a);
   dispatch(a, "deposit", 3, LABEL_DEPOSIT);
@@ -622,13 +697,13 @@ static void runtime_debreu(Asm *a, const EscrowContract *contract) {
   dispatch(a, "withdraw", 1, LABEL_WITHDRAW);
   revert_block(a);
   deposit(a);
-  cast(a, n);
+  cast(a, n, &classes);
   vote(a, n, contract->addresses);
-  settle(a, n);
+  settle(a, n, &classes);
   amend(a, packed);
   withdraw(a);
   bind(a, LABEL_TABLE);
-  for (size_t k = 0; k < (size_t)n * (n + 1) + 1; k++)
+  for (size_t k = 0; k < classes.bytes; k++)
     put(a, table[k]);
 }
 
@@ -641,12 +716,35 @@ static int check_impossibility(const EscrowContract *contract, FILE *err) {
   return 0;
 }
 
+/* The class sizes (M6): NULL, or 1 or more sizes, each 1 or more, sum n. */
+static int check_classes(const EscrowContract *contract, FILE *err) {
+  if (contract->classes == NULL)
+    return 0;
+  size_t sum = 0;
+  for (size_t c = 0; c < contract->nclasses; c++) {
+    if (contract->classes[c] < 1)
+      return fail(err, "EVM_TABLE", "class %zu has no members", c + 1);
+    sum += contract->classes[c];
+  }
+  if (contract->nclasses < 1 || sum != contract->members)
+    return fail(err, "EVM_TABLE", "the %zu class sizes sum to %zu, need %u members",
+                contract->nclasses, sum, contract->members);
+  return 0;
+}
+
 static int check_debreu(const EscrowContract *contract, FILE *err) {
   unsigned n = contract->members;
   if (n < 1 || n > EVM_DEBREU_MAX)
     return fail(err, "EVM_LIMIT", "the Debreu regime needs 1 to %d members, got %u",
                 EVM_DEBREU_MAX, n);
-  size_t wanted = ((size_t)n + 1) * ((size_t)n + 2) / 2;
+  if (check_classes(contract, err) != 0)
+    return 1;
+  Classes classes;
+  classes_of(contract, &classes);
+  size_t wanted = classes.rows;
+  if (wanted > EVM_ROWS_MAX || classes.bytes > EVM_TABLE_MAX)
+    return fail(err, "EVM_TABLE", "the classes give %zu rows and %zu table bytes, need at most %d and %d",
+                wanted, classes.bytes, EVM_ROWS_MAX, EVM_TABLE_MAX);
   if (contract->codes == NULL || contract->count != wanted)
     return fail(err, "EVM_TABLE", "%zu decision codes needed for %u members, got %zu",
                 wanted, n, contract->codes == NULL ? (size_t)0 : contract->count);

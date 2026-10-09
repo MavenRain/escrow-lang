@@ -1,5 +1,5 @@
 /* Test driver of the EVM back end, run with:
- *   tcc src/evm.c src/keccak.c -run test/evmtool.c creation|runtime N debreu CODE... [ADDRESS...]
+ *   tcc src/evm.c src/keccak.c -run test/evmtool.c creation|runtime N|K1,K2,... debreu CODE... [ADDRESS...]
  *   tcc src/evm.c src/keccak.c -run test/evmtool.c creation|runtime N impossibility [CODE...]
  *   tcc src/evm.c src/keccak.c -run test/evmtool.c keccak TEXT
  * Codes go to escrow_evm_write unchecked (0 to 255), so the tests reach its
@@ -15,7 +15,7 @@
 enum { TOOL_CODES = 512, TOOL_DIGITS = 9, TOOL_MEMBERS = 64 };
 
 static int usage(void) {
-  fputs("usage: evmtool creation|runtime N debreu CODE... [ADDRESS...] | evmtool creation|runtime N impossibility"
+  fputs("usage: evmtool creation|runtime N|K1,K2,... debreu CODE... [ADDRESS...] | evmtool creation|runtime N impossibility"
         " [CODE...] | evmtool keccak TEXT\n", stderr);
   return 2;
 }
@@ -67,6 +67,19 @@ int main(int argc, char **argv) {
   if (argc < 4 || argc - 4 > TOOL_CODES || !part_of(argv[1], &part) || !regime_of(argv[3], &regime))
     return usage();
   long members = number(argv[2]);
+  /* K1,K2,...: the member class sizes of K1 + K2 + ... members (M6). */
+  static unsigned sizes[TOOL_MEMBERS];
+  size_t nclasses = 0;
+  if (strchr(argv[2], ',') != NULL) {
+    members = 0;
+    for (char *part = strtok(argv[2], ","); part != NULL; part = strtok(NULL, ",")) {
+      long k = number(part);
+      if (k < 0 || nclasses == TOOL_MEMBERS || members > TOOL_MEMBERS)
+        return usage();
+      sizes[nclasses++] = (unsigned)k;
+      members += k;
+    }
+  }
   if (members < 0)
     return usage();
   unsigned char codes[TOOL_CODES];
@@ -86,6 +99,7 @@ int main(int argc, char **argv) {
     if (!address(argv[4 + count + i], words + 32 * i))
       return usage();
   int listed = regime == ESCROW_REGIME_DEBREU || count > 0;
-  EscrowContract contract = { (unsigned)members, regime, listed ? codes : NULL, count, given > 0 ? words : NULL };
+  EscrowContract contract = { (unsigned)members, regime, listed ? codes : NULL, count, given > 0 ? words : NULL,
+                              nclasses > 0 ? sizes : NULL, nclasses };
   return escrow_evm_write(&contract, part, stdout, stderr) == 0 ? 0 : 1;
 }

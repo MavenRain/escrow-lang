@@ -64,10 +64,8 @@ refuse classes-sum REFUSE_CLASS_SUM memberClasses "$members" \
   'def memberClasses : Classes := kcons 2 (kcons 2 knil)'
 refuse classes-nil REFUSE_CLASS_SUM memberClasses "$members" 'def memberClasses : Classes := knil'
 refuse classes-type REFUSE_CLASS_SUM memberClasses "$members" 'def memberClasses : Nat := 3'
-# memberClasses (M6 chunk 2): a build with 2 or more classes refuses
-# REFUSE_CLASS_TABLE until the runtime reads the classes. Above 128 table rows,
-# the build refuses REFUSE_TABLE_SIZE first.
-refuse_build classes-build REFUSE_CLASS_TABLE memberClasses "$root/test/fixtures/two-classes.esc"
+# memberClasses (M6): above 128 table rows, a build with 2 or more classes
+# refuses REFUSE_TABLE_SIZE.
 refuse_build classes-size-two REFUSE_TABLE_SIZE memberClasses "$root/test/fixtures/two-classes-14.esc"
 refuse_build classes-size-trivial REFUSE_TABLE_SIZE memberClasses "$root/test/fixtures/trivial-classes-14.esc"
 

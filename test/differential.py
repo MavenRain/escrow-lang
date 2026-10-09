@@ -21,6 +21,7 @@ usage: python3 test/differential.py [--program PROG]
 """
 import argparse
 import itertools
+import math
 from pathlib import Path
 import re
 import shutil
@@ -33,6 +34,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ESCROWC = ROOT / 'build/escrowc'
 WORK = ROOT / '.gatework/differential'
 PROGRAM = ROOT / 'examples/programs/arrow-debreu.esc'
+# M6 chunk 3 (R15): the runtime of 2 member classes, cast code = escrowc table code.
+TWO_CLASSES = ROOT / 'test/fixtures/two-classes.esc'
 CODES = (1, 2, 3)
 DECISIONS = {1: 'release', 2: 'refund', 3: 'hold'}
 PAYER, PAYEE, AMOUNT = 17, 34, 5
@@ -58,12 +61,20 @@ def members(program):
     return int(found.group(1))
 
 
-def table(program, size):
+def member_classes(program, size):
+    # The class sizes of memberClasses (M6), one class of size without the def.
+    classes = tuple(map(int, re.findall(r'[0-9]+', escrowc('eval', program, 'memberClasses'))))
+    S.require(sum(classes) == size and 0 not in classes, f'memberClasses {classes} do not sum to {size}')
+    return classes
+
+
+def table(program, size, classes):
     words = escrowc('table', program).split()
     S.require(words[:2] == ['debreu', str(size)], f'table is not debreu {size}: {words[:2]}')
     codes = tuple(map(int, words[2:]))
-    S.require(len(codes) == (size + 1) * (size + 2) // 2 and set(codes) <= set(CODES),
-              f'table has {len(codes)} codes, not one code in 1..3 per tally')
+    rows = math.prod((k + 1) * (k + 2) // 2 for k in classes)
+    S.require(len(codes) == rows and set(codes) <= set(CODES),
+              f'table has {len(codes)} codes, not one code in 1..3 per row of {rows}')
     return codes
 
 
@@ -83,7 +94,7 @@ def checker_verdicts(program, vectors):
 
 def contract(program):
     def part(name, *flags):
-        out = WORK / f'{name}.hex'
+        out = S.WORK / f'{name}.hex'
         escrowc('build', program, *flags, '-o', out, lines=0)
         return out.read_text().strip()
 
@@ -140,7 +151,7 @@ def diffOpen : Nat := openCount diffAfter
 
 def source_settled(text, size, index, vector):
     # One escrowc eval per definition, because eval gives one NAME per run.
-    path = WORK / f'source-{index}.esc'
+    path = S.WORK / f'source-{index}.esc'
     path.write_text(source(text, size, vector))
     (ledger_payer, ledger_payee, credit_payee, credit_payer, count,
      claim_payer, claim_payee, amount, closed, opened) = (
@@ -157,18 +168,29 @@ def source_settled(text, size, index, vector):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--program', type=Path, default=PROGRAM)
-    program = parser.parse_args().program.resolve()
+    parser.add_argument('--program', type=Path, action='append')
+    programs = parser.parse_args().program or [PROGRAM, TWO_CLASSES]
     S.require(shutil.which('evm') and shutil.which('cast'), 'evm and cast are required')
     S.require(ESCROWC.exists(), f'{ESCROWC} is missing: run make')
-    WORK.mkdir(parents=True, exist_ok=True)
-    S.WORK = WORK
+    for program in programs:
+        run(program.resolve())
+
+
+def run(program):
+    work = WORK / program.stem
+    work.mkdir(parents=True, exist_ok=True)
+    S.WORK = work
     size = members(program)
     addresses = member_addresses(program, size)
     text = program.read_text()
     vectors = tuple(itertools.product(CODES, repeat=size))
-    codes = table(program, size)
+    classes = member_classes(program, size)
+    codes = table(program, size, classes)
     verdicts = checker_verdicts(program, vectors)
+    for index, vector in enumerate(vectors):
+        row = S.row_index(classes, vector)
+        S.require(verdicts[vector] == codes[row],
+                  f'differential-table-{index}: verdict {verdicts[vector]} != table row {row} code {codes[row]}')
     runtime = contract(program)
     packed = sum(code * 4**index for index, code in enumerate(codes))
     S.expect('differential-amend', runtime, S.data('amend'), {}, {}, packed)
@@ -185,7 +207,7 @@ def main():
     print(f'DIFFERENTIAL vectors={len(vectors)} '
           f'codes={"".join(map(str, verdicts.values()))} '
           f'amend,verdicts geth=escrowc storage=escrowc-eval OK '
-          f'(logs: {WORK})')
+          f'(logs: {work})')
 
 
 if __name__ == '__main__':

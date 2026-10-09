@@ -166,8 +166,19 @@ def tally_index(members, release, refund):
     return sum(members + 1 - r for r in range(release)) + refund
 
 
-def verdict(members, codes, ballots):
-    return codes[tally_index(members, ballots.count(1), ballots.count(2))]
+def row_index(classes, ballots):
+    # The escrowc table row of ballots (M6): class 1 is the outer digit, and the
+    # ballots of a class of k members give the digit tally_index(k, r, f).
+    index, start = 0, 0
+    for k in classes:
+        part = ballots[start:start + k]
+        index = index * (k + 1) * (k + 2) // 2 + tally_index(k, part.count(1), part.count(2))
+        start += k
+    return index
+
+
+def verdict(members, codes, ballots, classes=None):
+    return codes[row_index(classes or (members,), tuple(ballots))]
 
 
 def deploy(name, creation, runtime):
