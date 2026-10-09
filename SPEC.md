@@ -1,6 +1,6 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M5 (O1, a proof of section 4.1; planned, section 10).
+Status: draft, milestone M5 done (O1 CLOSED, a proof of section 4.1; section 10).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -167,8 +167,49 @@ A constitution of the form `fun x => H (orbit x)` has the aggregation
 aggregation that a program can write. That program is in the
 Arrow-impossibility regime.
 
-The claim of section 4.1 is a design fact that the M5 proof host must prove
-(section 10). It is not proved here (open item O1).
+The M5 proof host proves the claim of section 4.1 (open item O1, CLOSED
+2026-10-09 by rung 3, mechanism-lang; section 10). The proof is the file
+`examples/escrow-o1/O1.mech` in the mechanism-lang repository at commit
+`2049161`. The file ports the vote model at a members parameter `n`:
+`Ballot`, `Config n`, `Tally n`, the orbit map `orbit n` and its section
+`sec n`. `Decision` has the three outcomes `dyes` (release), `dno` (refund)
+and `dhold` (hold). The proof uses a local record of the left Kan extension,
+not UAT `Aggregation act F`.
+
+To check the proof, go to the root of the mechanism-lang repository. Join
+`prelude/init.mech` and `examples/escrow-o1/O1.mech` with a newline into one
+file. Then run `_bend2/bin/mech.exe check` on that file. The result is exit 0
+(maximum resident set 8192 KB). `_bend2/bin/mech.exe axioms` on the same file
+gives exit 0 and no output. The file has no hole and no assumed term.
+`examples/escrow-o1/Regression.mech`, joined after `O1.mech`, also checks
+(exit 0). It tests the hold outcome, the round trips of the Kan record and a
+ballot permutation. The `README.md` in that directory gives the commands.
+
+These definitions in `O1.mech` prove the parts of the claim:
+
+| Part | Definitions |
+|---|---|
+| The Sigma: `L` and the factorization of `F` through `orbit` | `Agg`, `aggL`, `mkAgg` |
+| The local Kan record: `L`, the unit, `desc`, `fac` and `uniq` | `Kan`, `descAt`, `facAt`, `uip` |
+| The equivalence and its round trips | `toKan`, `fromKan`, `tripA`, `tripK`, `tripKUnit` |
+| Fact 1 | `fact1` |
+| Fact 2 | `gov`, `Self`, `fact2fwd`, `fact2bwd` |
+| Fact 3 | `fact3fwd`, `fact3bwd` |
+| The aggregation of `fun x => H (orbit x)` | `mkConst` |
+
+The proof has three limits that come from the mechanism-lang checker:
+
+1. The checker has no eta rule for pairs. Thus the round trips are pointwise
+   on `L` and on the unit. `tripA` states that `fromKan n F (toKan n F a)` is
+   equal to `mkAgg n F a.1 a.2`. `tripK` states that
+   `toKan n F (fromKan n F k)` keeps each value of `L`. `tripKUnit` states the
+   same for each unit component, in transport form. `toKan` builds `desc`,
+   `fac` and `uniq` again with `descAt`, `facAt` and `uip`.
+2. The conversion does not apply proof irrelevance to the indices of
+   `MechProofEq`. Thus `uip` is in transport form: for each `P` and each two
+   erased proofs `q1` and `q2` of `MechEq Decision a b`, `P q1` gives `P q2`.
+3. The last field of `Kan n F` quantifies over
+   `P : MechEq Decision a b -> Type 0`. Thus `Kan n F` is in `Type 1`.
 
 ## 5. Core operations
 
@@ -319,10 +360,14 @@ facts are in `probe/CAPABILITY.md`.
 
 ## 9. Open items
 
-- O1. Prove section 4.1 using the M5 proof-host order (section 10): at a
-  discrete `D`, the left Kan extension is equivalent to the Sigma of section 4.
-  Use UAT `Aggregation act F` where available, or the local Kan record
-  described in M5 on a host without UAT.
+- O1. CLOSED 2026-10-09 by M5 rung 3 (mechanism-lang commit `2049161`,
+  `examples/escrow-o1/O1.mech`; section 4.1). At a discrete `D`, the local
+  Kan record `Kan n F` is equivalent to the Sigma `Agg n F` (`toKan`,
+  `fromKan`, `tripA`, `tripK`, `tripKUnit`). The three facts are `fact1`,
+  `fact2fwd` with `fact2bwd`, and `fact3fwd` with `fact3bwd`. The proof uses
+  the local Kan record, not UAT `Aggregation act F`. Section 4.1 gives the
+  three limits of the proof. The old text of O1 is in
+  `git show 71d51b1:SPEC.md`.
 - O2. `act` is the symmetric group on members. The design and the DAO
   example (a `Z2` flip on spins) keep `act` general.
 - O3. RULED 2026-10-06: `D` stays discrete and the Schelling-Ising row is
@@ -459,8 +504,9 @@ facts are in `probe/CAPABILITY.md`.
   documents: this section, design sections 3 and 5 (O5 and O6 CLOSED) and
   `probe/CAPABILITY.md`.
   `make test` gives 106 ok.
-- M5: O1, a proof of section 4.1 (USER ruling 2026-10-08). Planned. The
-  proof host is the first of these that can state and check all of O1:
+- M5: O1, a proof of section 4.1 (USER ruling 2026-10-08). Done
+  (2026-10-09). The proof host is the first of these that can state and
+  check all of O1:
   escrow-lang (`proofs/O1.esc`), Bend 2 (`bend/O1.bend`), mechanism-lang
   (an example program in that repository) or Lean 4 (a module in
   `self-referential-dao`). On a host without UAT, the left side of the
@@ -469,4 +515,13 @@ facts are in `probe/CAPABILITY.md`.
   (2026-10-09): the row `addresses-missing` of `test/refusal.sh` builds
   `test/mutants/debreu-no-addresses.esc` (the Arrow-Debreu example without
   `memberAddresses`) and gets `REFUSE_ADDRESSES`. `make test` gives 107 ok.
-  The last chunk updates section 4.1 and O1.
+  Rung 1 (escrow-lang, chunk 1) failed. The prelude cannot write a section
+  `Tally -> Config`, because built-in `Nat` has no eliminator. No equality
+  family can type `uniq` or the full round trips. Without that section,
+  fact 1 at arbitrary tallies and fact 3 backward also fail. Rung 2 (Bend
+  2, chunk 2) failed. The affine closure rule blocks fact 2 backward and fact 3
+  forward, because each one uses the unit at two points. Rung 3
+  (mechanism-lang, chunk 3) passed: `examples/escrow-o1/O1.mech` at
+  mechanism-lang commit `2049161` (section 4.1). Rung 4 (Lean 4) was not
+  necessary. The failed rungs added no file to escrow-lang. Chunk 5 updates
+  section 4.1, O1 and this section.
