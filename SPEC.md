@@ -1,9 +1,9 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M7 done (O14 CLOSED, the decision flip; section
-10). M6 closed O2 for member classes. M5 gave a proof of section 4.1 (O1
-CLOSED), and M7 gave a proof of the flip fact of section 4.1. M8 is
-planned: the two proofs at the member classes of M6.
+Status: draft, milestone M8 done (the two proofs of section 4.1 at the
+member classes of M6; section 10). M6 closed O2 for member classes. M5
+gave a proof of section 4.1 (O1 CLOSED), and M7 gave a proof of the flip
+fact of section 4.1 (O14 CLOSED, the decision flip).
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -208,7 +208,8 @@ the table: an orbit rule `L` and a proof that `F` factors through it.
 For M6, these quotient claims apply to the image of `orbit`, not every
 inhabitant of the source `Tally` type (section 4). There is no section of
 `orbit` on that entire type: the unit leaves `L` unconstrained at values
-outside the image. The M5 proof below uses a different, one-class `Tally n`.
+outside the image. The M5 proof below uses a different, one-class `Tally n`,
+and the M8 proof uses `CTally m cs`, one such count triple for each class.
 
 Three facts follow for the orbit quotient:
 
@@ -230,10 +231,11 @@ The M5 proof host proves the claim of section 4.1 (open item O1, CLOSED
 `Ballot`, `Config n`, `Tally n`, the orbit map `orbit n` and its section
 `sec n`. `Decision` has the three outcomes `dyes` (release), `dno` (refund)
 and `dhold` (hold). The proof uses a local record of the left Kan extension,
-not UAT `Aggregation act F`. The proof covers one class only: `Tally n` is
-one count triple, and the group is the symmetric group on the `n` members.
-The member classes of M6 (section 4) are not in the proof, and M6 does not
-extend it (section 10).
+not UAT `Aggregation act F`. `O1.mech` covers one class: `Tally n` is one
+count triple, and the group is the symmetric group on the `n` members. M8
+proves the claim at each list `cs` of member class sizes of M6 (section 4).
+At the list `[n]`, the class model of M8 is the model of `O1.mech` (the
+M8 text at the end of this section).
 
 To check the proof, go to the root of the mechanism-lang repository. Join
 `prelude/init.mech` and `examples/escrow-o1/O1.mech` with a newline into one
@@ -299,10 +301,56 @@ no axiom. The `README.md` in that directory gives the commands.
 | `orbit n (flipC n x) = flipT n (orbit n x)` | `orbitFlip` |
 | The flip fact, in both directions | `flipFwd`, `flipBwd` |
 
-The proof has the limits of the M5 proof. It covers one class: `Tally n`
-is one count triple, as in `O1.mech`. The member classes of M6 are not in
-the proof. The checker has no eta rule for pairs, so the file does not
-state `flipC n (flipC n x) = x`. The flip fact does not need it.
+The proof has the limits of the M5 proof. `O14.mech` covers one class:
+`Tally n` is one count triple, as in `O1.mech`. M8 proves the flip fact at
+each list `cs` of member class sizes (the M8 text below). The checker has
+no eta rule for pairs, so the file does not state
+`flipC n (flipC n x) = x`. The flip fact does not need it.
+
+The proofs at member classes (M8). The proofs of O1 and O14 at the member
+classes of M6 are in the mechanism-lang directory
+`examples/escrow-classes`: `Classes.mech` (commit `3bf2475`), `O1C.mech`
+(commit `cb13de9`) and `O14C.mech` (commit `0ea38a9`). The proofs are in
+mechanism-lang, because the class model needs recursion on the class
+count, a `mu` pair and equality at `CTally m cs`. `escrowc` refuses
+`def rec` (`REFUSE_REC`) and `mu` (`REFUSE_MU`) in a program, escrow-lang
+`Nat` has no eliminator (`TYPE_MATCH`), and the only equality families of
+escrow-lang are `EqNat`, `EqDec` and `EqTally`.
+
+`Classes.mech` states the vote model at the class count `m` and the class
+sizes `cs : CSizes m`: one configuration, one count triple and one orbit
+map for each class (`CConfig m cs`, `CTally m cs` and `corbit m cs`), and
+the section `csec m cs`. `csecOrbit` and `corbitSec` give the round trip
+at `cs`. At the list `[n]`, `corbit` and `csec` are `orbit n` and `sec n`
+of `O1.mech` (`cOneOrbit`, `cOneSec`). `O1C.mech` states O1 sections 4 to
+7 one time, over abstract types with an orbit map and a section. Then it
+uses them at `Config n` and at `CConfig m cs`. `O14C.mech` states the flip
+on `CConfig m cs` and `CTally m cs` (the flip of `O14.mech` at each
+class), the lemma `corbitFlip` at `cs`, and the flip fact over the
+abstract types (`flipFwdX`, `flipBwdX`). Thus the three facts of O1 and
+the flip fact of O14 hold at each `cs`. The proofs use the local Kan
+record, as the M5 proof does, and they have the limits of the M5 proof.
+`O1.mech` and `O14.mech` do not change, and they still check.
+
+To check the proofs, go to the root of the mechanism-lang repository. Join
+`prelude/init.mech`, `examples/escrow-o1/O1.mech`,
+`examples/escrow-o14/O14.mech` and the three files of
+`examples/escrow-classes` (`Classes.mech`, `O1C.mech`, `O14C.mech`) with a
+newline into one file of 1302 lines. Then run `_bend2/bin/mech.exe check`
+on that file. The result is exit 0 (maximum resident set 11296 KB).
+`_bend2/bin/mech.exe axioms` on the same file gives exit 0 and no output
+(11376 KB). The `README.md` in that directory gives the join command and
+a table of all the names. These are the main names:
+
+| Part | Definitions |
+|---|---|
+| The class model and its round trip at `cs` | `CConfig`, `CTally`, `corbit`, `csec`, `csecOrbit`, `corbitSec` |
+| At `[n]`, the model of `O1.mech` | `cOneOrbit`, `cOneSec` |
+| `descAt` and `toKan` at `cs` | `cDescAtC`, `cToKanC` |
+| Facts 1 to 3 at `cs` | `cFact1C`, `cFact2fwdC`, `cFact2bwdC`, `cFact3fwdC`, `cFact3bwdC` |
+| `orbit (flip x) = flip (orbit x)` at `cs` | `corbitFlip` |
+| The flip fact at `cs`, in both directions | `cFlipFwdC`, `cFlipBwdC` |
+| The flip fact at `Config n`, with the types of `flipFwd` and `flipBwd` | `cFlipFwdN`, `cFlipBwdN` |
 
 ## 5. Core operations
 
@@ -494,8 +542,10 @@ facts are in `probe/CAPABILITY.md`.
   `fact2fwd` with `fact2bwd`, and `fact3fwd` with `fact3bwd`. The proof uses
   the local Kan record, not UAT `Aggregation act F`. Section 4.1 gives the
   three limits of the proof. The old text of O1 is in
-  `git show 71d51b1:SPEC.md`. M8 (planned, section 10) extends the proof
-  to the member classes of M6.
+  `git show 71d51b1:SPEC.md`. M8 (done, section 10) proves the
+  equivalence and the three facts at the member classes of M6:
+  mechanism-lang commits `3bf2475` (`Classes.mech`) and `cb13de9`
+  (`O1C.mech`) in `examples/escrow-classes` (section 4.1).
 - O2. CLOSED 2026-10-09 for member classes by M6 (section 10). `act` is
   the product of the symmetric groups on the member classes of
   `def memberClasses` (section 4). A program without the declaration has
@@ -599,7 +649,9 @@ facts are in `probe/CAPABILITY.md`.
   `examples/escrow-o14/O14.mech` (section 4.1). The escrow-lang commits:
   plan `3b42ce2`, chunk 1 `f515f1f`, chunk 2 `28aff21`, chunk 4 `7cfe3d6`,
   chunk 5 `8c3c32b`. `act` does not change: it relabels members only. M8
-  (planned, section 10) extends the proof to the member classes of M6.
+  (done, section 10) proves the flip fact at the member classes of M6:
+  mechanism-lang commit `0ea38a9`, `examples/escrow-classes/O14C.mech`
+  (section 4.1).
 
 
 ## 10. Milestones
@@ -724,7 +776,7 @@ facts are in `probe/CAPABILITY.md`.
   14-member build gives 2170 bytes and 120 codes, and the declaration does
   not change its runtime (byte-identical).
 - M8: the O1 and O14 proofs at member classes (USER ruling 2026-10-09).
-  Planned. The USER ruling (verbatim): "(a) Member-class proofs
+  Done 2026-10-09. The USER ruling (verbatim): "(a) Member-class proofs
   (Recommended)". The text of that option: "Extend the O1 (M5) and O14
   (M7) proofs in mechanism-lang from one count triple to the M6 member
   classes." The proofs of M5 and M7 (section 4.1) cover one class only:
@@ -745,4 +797,18 @@ facts are in `probe/CAPABILITY.md`.
   and `probe/CAPABILITY.md` if it gives the one-class limit. Chunks 1 to
   3 change mechanism-lang only. The escrow-lang source, tables, test rows
   and EVM output do not change, and `make test` gives 151 ok in each
-  chunk.
+  chunk. Two more USER rulings (verbatim): the files "escrow-classes dir
+  (Recommended)"; the form of the O1 facts at classes "Abstract
+  (Recommended)". The commits: mechanism-lang chunk 1 `3bf2475`
+  (`examples/escrow-classes/Classes.mech`: the class model, the round
+  trip and the one-class lemma); chunk 2 `cb13de9` (`O1C.mech`: O1
+  sections 4 to 7 over abstract types, used at `Config n` and at
+  `CConfig m cs`); chunk 3 `0ea38a9` (`O14C.mech`: the flip at `cs`,
+  `corbitFlip` and the flip fact; `README.md`); chunk 4 in escrow-lang
+  (the documents: section 4.1, O1, O14 and this section).
+  `probe/CAPABILITY.md` does not give the one-class limit of the proofs,
+  thus it does not change. The join of section 4.1 (1302 lines) checks
+  with exit 0, and `axioms` gives exit 0 and no output. The escrow-lang
+  counts are the counts of M7: `make test` gives 151 ok,
+  `test/settlement.py` gives `cases=148 deploy=2`, and the 14-member
+  build gives 2170 bytes and 120 codes.
