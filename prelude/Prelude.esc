@@ -275,9 +275,9 @@ def orbit : Config -> Tally := fun (x : Config) =>
 -- keeps hold.  `swapT3` and `flipTallies` are the same flip on one count
 -- triple and on the class tallies.  escrowc checks the program declaration
 -- `def decisionFlip : Decision -> Decision := flipDecision` just after
--- `flipDecision` (REFUSE_FLIP_FORM).  There is no flip on `Config` or
--- `Tally`: the exchange `a + (b + c) = b + (a + c)` has no proof for an open
--- `Nat` (probe-forced).
+-- `flipDecision` (REFUSE_FLIP_FORM).  The prelude has no flip on `Config`
+-- or `Tally`.  `proofs/O14.esc` proves the exchange and the flip on `Tally`
+-- (M9).  escrow-lang has no flip on `Config` (ruling c, SPEC section 9 O15).
 def flipDecision : Decision -> Decision := decide Decision refund release hold
 
 def swapT3 : T3 -> T3 := fun (t : T3) => tuple (t.1.0, tuple (t.0, t.1.1))
