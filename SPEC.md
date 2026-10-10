@@ -2,7 +2,8 @@
 
 Status: draft, milestone M7 done (O14 CLOSED, the decision flip; section
 10). M6 closed O2 for member classes. M5 gave a proof of section 4.1 (O1
-CLOSED), and M7 gave a proof of the flip fact of section 4.1.
+CLOSED), and M7 gave a proof of the flip fact of section 4.1. M8 is
+planned: the two proofs at the member classes of M6.
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -493,7 +494,8 @@ facts are in `probe/CAPABILITY.md`.
   `fact2fwd` with `fact2bwd`, and `fact3fwd` with `fact3bwd`. The proof uses
   the local Kan record, not UAT `Aggregation act F`. Section 4.1 gives the
   three limits of the proof. The old text of O1 is in
-  `git show 71d51b1:SPEC.md`.
+  `git show 71d51b1:SPEC.md`. M8 (planned, section 10) extends the proof
+  to the member classes of M6.
 - O2. CLOSED 2026-10-09 for member classes by M6 (section 10). `act` is
   the product of the symmetric groups on the member classes of
   `def memberClasses` (section 4). A program without the declaration has
@@ -595,8 +597,9 @@ facts are in `probe/CAPABILITY.md`.
   proof that `F` commutes with the flip exactly when `L` does on the image
   of `orbit` is rung 2: mechanism-lang commit `65a474f`,
   `examples/escrow-o14/O14.mech` (section 4.1). The escrow-lang commits:
-  plan `3b42ce2`, chunk 1 `f515f1f`, chunk 2 `28aff21`, chunk 4 `7cfe3d6`.
-  `act` does not change: it relabels members only.
+  plan `3b42ce2`, chunk 1 `f515f1f`, chunk 2 `28aff21`, chunk 4 `7cfe3d6`,
+  chunk 5 `8c3c32b`. `act` does not change: it relabels members only. M8
+  (planned, section 10) extends the proof to the member classes of M6.
 
 
 ## 10. Milestones
@@ -714,9 +717,32 @@ facts are in `probe/CAPABILITY.md`.
   4); chunk 2 `28aff21` (`REFUSE_FLIP_TABLE`, section 7); chunk 3
   mechanism-lang `65a474f` (`examples/escrow-o14/O14.mech`, section 4.1);
   chunk 4 `7cfe3d6` (the declaration in `arrow-debreu`, `two-classes` and
-  `council`, which all commute); chunk 5 (the documents: sections 4, 4.1,
-  7, 9 and this section, and `probe/CAPABILITY.md`). `make test` gives 151
-  ok. `test/settlement.py` gives `cases=148 deploy=2`.
+  `council`, which all commute); chunk 5 `8c3c32b` (the documents:
+  sections 4, 4.1, 7, 9 and this section, and `probe/CAPABILITY.md`).
+  `make test` gives 151 ok. `test/settlement.py` gives `cases=148 deploy=2`.
   `test/differential.py` gives 27, 27 and 81 vectors with the M6 codes. The
   14-member build gives 2170 bytes and 120 codes, and the declaration does
   not change its runtime (byte-identical).
+- M8: the O1 and O14 proofs at member classes (USER ruling 2026-10-09).
+  Planned. The USER ruling (verbatim): "(a) Member-class proofs
+  (Recommended)". The text of that option: "Extend the O1 (M5) and O14
+  (M7) proofs in mechanism-lang from one count triple to the M6 member
+  classes." The proofs of M5 and M7 (section 4.1) cover one class only:
+  `Tally n` is one count triple. M8 states the vote model at the class
+  sizes `cs`: one configuration, one count triple and one `orbit` for
+  each class. Then it proves the three facts of O1 and the flip fact of
+  O14 at `cs`. At one class, the new model is the model of `O1.mech`.
+  The proofs are in mechanism-lang, next to `examples/escrow-o1/O1.mech`
+  and `examples/escrow-o14/O14.mech`. These two files do not change, and
+  they still check. There is no escrow-lang rung, because built-in `Nat`
+  has no induction (O9; M5 rung 1 and M7 chunk 0). Another proof host
+  needs a new USER ruling. The chunks: (0) a read-only probe: the sites
+  in `O1.mech`, `O14.mech` and the prelude, the form of the class model,
+  the file names, and the lemmas that the O1 facts use; (1) the class
+  model: `Config`, `Tallies`, `orbit` and its section at `cs`, the round
+  trip, and the one-class lemma; (2) the O1 facts at `cs`; (3) the flip
+  fact at `cs`; (4) the documents: section 4.1, O1, O14, this section,
+  and `probe/CAPABILITY.md` if it gives the one-class limit. Chunks 1 to
+  3 change mechanism-lang only. The escrow-lang source, tables, test rows
+  and EVM output do not change, and `make test` gives 151 ok in each
+  chunk.
