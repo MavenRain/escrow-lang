@@ -156,6 +156,16 @@ refuse "mutant mkAgg first with proof reflDec (first x)" TYPE_MISMATCH agg \
 refuse "mutant council member 2 in class 2" TYPE_MISMATCH verdictX \
   "the types differ: expected EqDec refund release, found EqDec release release" \
   check "$root/test/mutants/council-class-move.esc"
+# decisionFlip (M7): the declaration checks at decl 1, and at decl 2 after
+# memberClasses. The mutant is arrow-debreu.esc with the identity at decl 1.
+printf '%s\n' 'def members : Nat := 3' 'def decisionFlip : Decision -> Decision := flipDecision' > "$out/flip.esc"
+printf '%s\n' 'def members : Nat := 3' 'def memberClasses : Classes := kcons 2 (kcons 1 knil)' \
+  'def decisionFlip : Decision -> Decision := fun (d : Decision) => decide Decision refund release hold d' \
+  > "$out/flip-classes.esc"
+expect "check decisionFlip" 0 "ok impossibility" check "$out/flip.esc"
+expect "check decisionFlip after memberClasses" 0 "ok impossibility" check "$out/flip-classes.esc"
+refuse "mutant debreu decisionFlip identity" REFUSE_FLIP_FORM decisionFlip \
+  "must map release to refund, refund to release and hold to hold" check "$root/test/mutants/debreu-flip-identity.esc"
 refuse "verdicts of a name that is not a ChoiceRule" VERDICT_TYPE agg "agg is not a ChoiceRule" \
   verdicts "$programs/arrow-debreu.esc" agg
 refuse "eval of an unknown name" TYPE_SCOPE nothing "nothing is not declared" \

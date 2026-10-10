@@ -16,6 +16,9 @@
  *     invalid member class sizes (M6);
  *   REFUSE_TABLE_SIZE
  *     a Debreu table with multiple member classes and more than 128 rows (M6);
+ *   REFUSE_FLIP_FORM
+ *     a def decisionFlip with a wrong type, a body that is not the flip or a
+ *     wrong position (M7);
  *   TYPE_SCOPE, TYPE_DUPLICATE, TYPE_MISMATCH (with both normal forms),
  *   TYPE_SHAPE, TYPE_INFER, TYPE_UNIVERSE, TYPE_ERASED, TYPE_MATCH, TYPE_MU,
  *   TYPE_REC, TYPE_NAT, TYPE_FUEL, TYPE_INTERNAL, MEMORY

@@ -1439,6 +1439,53 @@ static size_t member_classes(C *c, const Program *program) {
   return stated ? 2 : 1;
 }
 
+/* M7 (R3): check the declared type before the body so a wrong annotation
+ * gets REFUSE_FLIP_FORM, then check the three decision images. */
+static void flip_ok(C *c, const Program *program, size_t index) {
+  static const char *const from[3] = {"release", "refund", "hold"};
+  static const char *const to[3] = {"refund", "release", "hold"};
+  const Decl *d = &program->decls[index];
+  Global *flip = find_global(c, "flipDecision");
+  if (c->failed || flip == NULL)
+    return;
+  c->file = program->file;
+  c->def = span_of(d->name);
+  c->loc = d->loc;
+  c->fuel = CHECK_FUEL;
+  Value *type = closed_type(c, d->type);
+  if (!c->failed && !conv(c, type, flip->type, 0))
+    fail(c, "REFUSE_FLIP_FORM", d->loc, "def decisionFlip must have the type Decision -> Decision");
+  check_decl(c, program, index, 0);
+  Global *g = find_global(c, "decisionFlip");
+  if (c->failed || g == NULL)
+    return;
+  c->fuel = CHECK_FUEL;
+  int ok = 1;
+  for (size_t i = 0; i < 3 && ok; i++)
+    ok = conv(c, apply(c, g->value, global_value(c, from[i])), global_value(c, to[i]), 0);
+  if (!c->failed && !ok)
+    fail(c, "REFUSE_FLIP_FORM", d->loc, "def decisionFlip must map release to refund, refund to release and hold to hold");
+}
+
+/* escrowc checks a program `def decisionFlip` (decl FIRST, the first decl
+ * after memberClasses) just after the prelude decl `flipDecision`.  A def
+ * decisionFlip at any other position is REFUSE_FLIP_FORM.  Returns the first
+ * program decl that the program loop checks. */
+static size_t decision_flip(C *c, const Program *program, size_t first) {
+  const Decl *d = program->ndecls > first ? &program->decls[first] : NULL;
+  int stated = d != NULL && d->kind == DECL_DEF && same(d->name, "decisionFlip");
+  if (stated)
+    flip_ok(c, program, first);
+  for (size_t i = 1; i < program->ndecls && !c->failed; i++)
+    if (i != first && program->decls[i].kind == DECL_DEF && same(program->decls[i].name, "decisionFlip")) {
+      c->file = program->file;
+      c->def = span_of("decisionFlip");
+      fail(c, "REFUSE_FLIP_FORM", program->decls[i].loc,
+           "def decisionFlip must be the first program decl after memberClasses (decl %zu)", first);
+    }
+  return stated ? first + 1 : first;
+}
+
 static void find_regime(C *c) {
   Global *agg = find_global(c, "agg");
   Value *ty = agg != NULL && !agg->prelude ? agg->type : NULL;
@@ -1485,6 +1532,7 @@ int escrow_check(Arena *arena, const Program *prelude, const Program *program, E
   for (size_t i = 0; i < prelude->ndecls; i++) {
     check_decl(c, prelude, i, 1);
     first = same(prelude->decls[i].name, "Classes") ? member_classes(c, program) : first;
+    first = same(prelude->decls[i].name, "flipDecision") ? decision_flip(c, program, first) : first;
   }
   for (size_t i = first; i < program->ndecls; i++)
     check_decl(c, program, i, 0);

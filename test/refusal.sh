@@ -64,6 +64,15 @@ refuse classes-sum REFUSE_CLASS_SUM memberClasses "$members" \
   'def memberClasses : Classes := kcons 2 (kcons 2 knil)'
 refuse classes-nil REFUSE_CLASS_SUM memberClasses "$members" 'def memberClasses : Classes := knil'
 refuse classes-type REFUSE_CLASS_SUM memberClasses "$members" 'def memberClasses : Nat := 3'
+# decisionFlip (M7): a wrong type, a body that is not the flip and a wrong
+# position refuse REFUSE_FLIP_FORM.
+refuse flip-type REFUSE_FLIP_FORM decisionFlip "$members" 'def decisionFlip : Nat := 0'
+refuse flip-identity REFUSE_FLIP_FORM decisionFlip "$members" \
+  'def decisionFlip : Decision -> Decision := fun (d : Decision) => d'
+refuse flip-hold REFUSE_FLIP_FORM decisionFlip "$members" \
+  'def decisionFlip : Decision -> Decision := decide Decision refund release release'
+refuse flip-late REFUSE_FLIP_FORM decisionFlip "$members" 'def x : Nat := 0' \
+  'def decisionFlip : Decision -> Decision := flipDecision'
 # memberClasses (M6): above 128 table rows, a build with 2 or more classes
 # refuses REFUSE_TABLE_SIZE.
 refuse_build classes-size-two REFUSE_TABLE_SIZE memberClasses "$root/test/fixtures/two-classes-14.esc"

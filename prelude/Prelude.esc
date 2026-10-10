@@ -271,6 +271,22 @@ def orbit : Config -> Tally := fun (x : Config) =>
   match x as w in Config return Tally with
   | mkConfig xs e => mkTally (classTallyOf memberClasses xs) e
 
+-- M7 decision flip (O14, R3).  `flipDecision` swaps release and refund and
+-- keeps hold.  `swapT3` and `flipTallies` are the same flip on one count
+-- triple and on the class tallies.  escrowc checks the program declaration
+-- `def decisionFlip : Decision -> Decision := flipDecision` just after
+-- `flipDecision` (REFUSE_FLIP_FORM).  There is no flip on `Config` or
+-- `Tally`: the exchange `a + (b + c) = b + (a + c)` has no proof for an open
+-- `Nat` (probe-forced).
+def flipDecision : Decision -> Decision := decide Decision refund release hold
+
+def swapT3 : T3 -> T3 := fun (t : T3) => tuple (t.1.0, tuple (t.0, t.1.1))
+
+def rec flipTallies : Tallies -> Tallies := fun (ts : Tallies) =>
+  match ts as w in Tallies return Tallies with
+  | tnil => tnil
+  | tcons t rest => tcons (swapT3 t) (flipTallies rest)
+
 mu EqTally : (0 a : Tally) -> (0 b : Tally) -> Type 0 :=
   | reflTally : (0 t : Tally) -> EqTally t t
 

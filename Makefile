@@ -1,6 +1,6 @@
 # escrowc with TinyCC (PLAN.md). make builds build/escrowc and
 # build/parsetool, make check-clang checks every C file with clang, and
-# make test runs test/parse.sh.
+# make test runs the front-end and checker regression tests.
 TCC = tcc
 CLANG = cc
 TCCFLAGS = -std=c99 -Wall -Werror
@@ -23,10 +23,14 @@ build/escrowc: $(ESCROWC) $(HEADERS) build/prelude.c
 build/parsetool: $(FRONT) test/parsetool.c $(HEADERS) build/prelude.c
 	$(TCC) $(TCCFLAGS) -o $@ $(FRONT) test/parsetool.c build/prelude.c
 
+build/flip-form: $(FRONT) src/check.c test/flip-form.c $(HEADERS) build/prelude.c
+	$(TCC) $(TCCFLAGS) -o $@ $(FRONT) src/check.c test/flip-form.c build/prelude.c
+
 check-clang: build/prelude.c
 	$(CLANG) $(CLANGFLAGS) src/*.c test/*.c tools/*.c build/prelude.c
 
-test: build/escrowc build/parsetool
+test: build/escrowc build/parsetool build/flip-form
+	build/flip-form
 	sh test/parse.sh
 	sh test/check.sh
 	sh test/refusal.sh
