@@ -72,6 +72,7 @@ expect "table debreu with two member classes" 0 "debreu 3 3 3 3 3 2 3 2 2 2 3 3 
 # proof-irrelevant Tally field check.
 expect "prove nat induction" 0 "ok impossibility" prove "$root/test/fixtures/prove-nat.esc"
 expect "prove O1" 0 "ok impossibility" prove "$root/proofs/O1.esc"
+expect "prove O14" 0 "ok impossibility" prove "$root/proofs/O14.esc"
 refuse "table debreu with 14 members in two classes" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \
   table "$root/test/fixtures/two-classes-14.esc"
 refuse "table debreu with 14 classes of one member" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \

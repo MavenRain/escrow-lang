@@ -1,0 +1,111 @@
+-- M9 chunk 3: O14 at the prelude Config, Tally and orbit (verb prove).  Port
+-- of mechanism-lang examples/escrow-classes/O14C.mech section 3 (flipFwdX and
+-- flipBwdX).  USER ruling c (2026-10-10): no kernel, prelude or SPEC change.
+-- The flip on Config and orbitFlip are hypotheses: flipFwd and flipBwd take
+-- fC : Config -> Config and oF : (x : Config) -> EqTally (orbit (fC x))
+-- (flipT (orbit x)).  This file has no flip on Config.  A flip on Config
+-- needs a proof that the class tally of the flipped ballots has the total
+-- members.  classTallyOf calls takeTally, and takeTally splits on
+-- `case natLt j k`.  `case` is not dependent, and natLt does not reduce on an
+-- open Nat.  Thus a proof by induction on the ballots cannot do this split.
+-- The flip on Tally is flipT.  It flips each class triple (flipTallies) and
+-- keeps the proof of the total (totalsFlip).
+def members : Nat := 3
+
+-- Nat lemmas.  The Peano rules of natAdd act on the second argument only, so
+-- each proof is by induction on the last argument.  exchNat is the exchange
+-- a + (b + c) = b + (a + c) for an open Nat.  totalSwap and totalsFlip use it
+-- to show that the flip keeps the total of one triple and of the class
+-- tallies.
+
+def rec zeroAddL : (x : Nat) -> EqNat (natAdd 0 x) x := fun (n : Nat) =>
+  match n as q in Nat return EqNat (natAdd 0 q) q with
+  | zero => reflNat 0
+  | succ k => congNat (fun (m : Nat) => natAdd m 1) (natAdd 0 k) k (zeroAddL k)
+
+def rec succAddL : (k : Nat) -> (a : Nat) -> EqNat (natAdd (natAdd k 1) a) (natAdd (natAdd k a) 1) :=
+  fun (k : Nat) (n : Nat) =>
+    match n as q in Nat return EqNat (natAdd (natAdd k 1) q) (natAdd (natAdd k q) 1) with
+    | zero => reflNat (natAdd k 1)
+    | succ m => congNat (fun (x : Nat) => natAdd x 1) (natAdd (natAdd k 1) m) (natAdd (natAdd k m) 1) (succAddL k m)
+
+def rec commNat : (a : Nat) -> (b : Nat) -> EqNat (natAdd a b) (natAdd b a) :=
+  fun (a : Nat) (n : Nat) =>
+    match n as q in Nat return EqNat (natAdd a q) (natAdd q a) with
+    | zero => symmNat (natAdd 0 a) a (zeroAddL a)
+    | succ k =>
+        transNat (natAdd (natAdd a k) 1) (natAdd (natAdd k a) 1) (natAdd (natAdd k 1) a)
+          (congNat (fun (x : Nat) => natAdd x 1) (natAdd a k) (natAdd k a) (commNat a k))
+          (symmNat (natAdd (natAdd k 1) a) (natAdd (natAdd k a) 1) (succAddL k a))
+
+def rec exchNat : (a : Nat) -> (b : Nat) -> (c : Nat) -> EqNat (natAdd a (natAdd b c)) (natAdd b (natAdd a c)) :=
+  fun (a : Nat) (b : Nat) (n : Nat) =>
+    match n as q in Nat return EqNat (natAdd a (natAdd b q)) (natAdd b (natAdd a q)) with
+    | zero => commNat a b
+    | succ k => congNat (fun (x : Nat) => natAdd x 1) (natAdd a (natAdd b k)) (natAdd b (natAdd a k)) (exchNat a b k)
+
+def addCong2 : (a : Nat) -> (a2 : Nat) -> (b : Nat) -> (b2 : Nat) -> EqNat a a2 -> EqNat b b2 -> EqNat (natAdd a b) (natAdd a2 b2) :=
+  fun (a : Nat) (a2 : Nat) (b : Nat) (b2 : Nat) (e1 : EqNat a a2) (e2 : EqNat b b2) =>
+    transNat (natAdd a b) (natAdd a2 b) (natAdd a2 b2)
+      (congNat (fun (m : Nat) => natAdd m b) a a2 e1)
+      (congNat (fun (m : Nat) => natAdd a2 m) b b2 e2)
+
+def totalSwap : (t : T3) -> EqNat (total (swapT3 t)) (total t) :=
+  fun (t : T3) => exchNat t.1.0 t.0 t.1.1
+
+def rec totalsFlip : (ts : Tallies) -> EqNat (totals (flipTallies ts)) (totals ts) := fun (ts : Tallies) =>
+  match ts as w in Tallies return EqNat (totals (flipTallies w)) (totals w) with
+  | tnil => reflNat 0
+  | tcons t rest =>
+    (match rest as v in Tallies return EqNat (totals (flipTallies v)) (totals v) -> EqNat (totals (flipTallies (tcons t v))) (totals (tcons t v)) with
+     | tnil => fun (h : EqNat (totals (flipTallies tnil)) (totals tnil)) => totalSwap t
+     | tcons t2 rest2 => fun (h : EqNat (totals (flipTallies (tcons t2 rest2))) (totals (tcons t2 rest2))) =>
+         addCong2 (total (swapT3 t)) (total t) (totals (flipTallies (tcons t2 rest2))) (totals (tcons t2 rest2)) (totalSwap t) h)
+      (totalsFlip rest)
+
+-- The flip on Tally.
+def flipT : Tally -> Tally := fun (t : Tally) =>
+  match t as w in Tally return Tally with
+  | mkTally ts e => mkTally (flipTallies ts) (transNat (totals (flipTallies ts)) (totals ts) members (totalsFlip ts) e)
+
+-- flipFwd and flipBwd: O14C.mech section 3 at X = Config, Y = Tally,
+-- o = orbit, fY = flipT and fD = flipDecision.  rule F a is a.1 and
+-- cast F a is a.2.  F commutes with the flips at each x exactly when
+-- rule F a commutes with the flips on the image of orbit.
+def flipFwd : (fC : Config -> Config) -> (oF : (x : Config) -> EqTally (orbit (fC x)) (flipT (orbit x))) -> (F : ChoiceRule) -> (a : Aggregation F) -> (h : (x : Config) -> EqDec (F (fC x)) (flipDecision (F x))) -> (x : Config) -> EqDec (rule F a (flipT (orbit x))) (flipDecision (rule F a (orbit x))) :=
+  fun (fC : Config -> Config) (oF : (x : Config) -> EqTally (orbit (fC x)) (flipT (orbit x))) (F : ChoiceRule) (a : Aggregation F) (h : (x : Config) -> EqDec (F (fC x)) (flipDecision (F x))) (x : Config) =>
+    transDec (rule F a (flipT (orbit x))) (F (fC x)) (flipDecision (rule F a (orbit x)))
+      (transDec (rule F a (flipT (orbit x))) (rule F a (orbit (fC x))) (F (fC x))
+        (congTD (rule F a) (flipT (orbit x)) (orbit (fC x))
+          (symmTally (orbit (fC x)) (flipT (orbit x)) (oF x)))
+        (symmDec (F (fC x)) (rule F a (orbit (fC x))) (cast F a (fC x))))
+      (transDec (F (fC x)) (flipDecision (F x)) (flipDecision (rule F a (orbit x)))
+        (h x)
+        (congDec flipDecision (F x) (rule F a (orbit x)) (cast F a x)))
+
+def flipBwd : (fC : Config -> Config) -> (oF : (x : Config) -> EqTally (orbit (fC x)) (flipT (orbit x))) -> (F : ChoiceRule) -> (a : Aggregation F) -> (h : (x : Config) -> EqDec (rule F a (flipT (orbit x))) (flipDecision (rule F a (orbit x)))) -> (x : Config) -> EqDec (F (fC x)) (flipDecision (F x)) :=
+  fun (fC : Config -> Config) (oF : (x : Config) -> EqTally (orbit (fC x)) (flipT (orbit x))) (F : ChoiceRule) (a : Aggregation F) (h : (x : Config) -> EqDec (rule F a (flipT (orbit x))) (flipDecision (rule F a (orbit x)))) (x : Config) =>
+    transDec (F (fC x)) (rule F a (flipT (orbit x))) (flipDecision (F x))
+      (transDec (F (fC x)) (rule F a (orbit (fC x))) (rule F a (flipT (orbit x)))
+        (cast F a (fC x))
+        (congTD (rule F a) (orbit (fC x)) (flipT (orbit x)) (oF x)))
+      (transDec (rule F a (flipT (orbit x))) (flipDecision (rule F a (orbit x))) (flipDecision (F x))
+        (h x)
+        (congDec flipDecision (rule F a (orbit x)) (F x)
+          (symmDec (F x) (rule F a (orbit x)) (cast F a x))))
+
+-- flipT is an involution.  In flipFlip, swapT3 (swapT3 t) is equal to t by
+-- eta on tuples (conversion).  The EqNat field of Tally is proof-irrelevant.
+def rec flipFlip : (ts : Tallies) -> (0 P : Tallies -> Type 0) -> P ts -> P (flipTallies (flipTallies ts)) := fun (ts : Tallies) =>
+  match ts as w in Tallies return (0 P : Tallies -> Type 0) -> P w -> P (flipTallies (flipTallies w)) with
+  | tnil => fun (0 P : Tallies -> Type 0) (p : P tnil) => p
+  | tcons t rest => fun (0 P : Tallies -> Type 0) (p : P (tcons t rest)) =>
+      flipFlip rest (fun (r : Tallies) => P (tcons t r)) p
+
+def flipTInv : (t : Tally) -> EqTally (flipT (flipT t)) t := fun (t : Tally) =>
+  match t as w in Tally return EqTally (flipT (flipT w)) w with
+  | mkTally ts e =>
+      flipFlip ts (fun (r : Tallies) => (e2 : EqNat (totals r) members) -> EqTally (mkTally r e2) (mkTally ts e))
+        (fun (e2 : EqNat (totals ts) members) => reflTally (mkTally ts e))
+        (transNat (totals (flipTallies (flipTallies ts))) (totals (flipTallies ts)) members (totalsFlip (flipTallies ts))
+          (transNat (totals (flipTallies ts)) (totals ts) members (totalsFlip ts) e))
