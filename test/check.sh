@@ -166,6 +166,13 @@ expect "check decisionFlip" 0 "ok impossibility" check "$out/flip.esc"
 expect "check decisionFlip after memberClasses" 0 "ok impossibility" check "$out/flip-classes.esc"
 refuse "mutant debreu decisionFlip identity" REFUSE_FLIP_FORM decisionFlip \
   "must map release to refund, refund to release and hold to hold" check "$root/test/mutants/debreu-flip-identity.esc"
+# A stated decisionFlip keeps a table that commutes with the flip. The
+# mutant gives release at the tie (1, 1, 1), and the flip sends row 5 to row 5.
+awk 'NR==2 {print "def decisionFlip : Decision -> Decision := flipDecision"} {print}' \
+  "$programs/arrow-debreu.esc" > "$out/flip-debreu.esc"
+expect "table arrow-debreu with decisionFlip" 0 "debreu 3 3 3 2 2 3 3 2 1 1 1" table "$out/flip-debreu.esc"
+refuse "mutant debreu flip table" REFUSE_FLIP_TABLE decisionFlip "does not commute with table row 5" \
+  table "$root/test/mutants/debreu-flip-table.esc"
 refuse "verdicts of a name that is not a ChoiceRule" VERDICT_TYPE agg "agg is not a ChoiceRule" \
   verdicts "$programs/arrow-debreu.esc" agg
 refuse "eval of an unknown name" TYPE_SCOPE nothing "nothing is not declared" \

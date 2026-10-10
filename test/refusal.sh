@@ -104,6 +104,9 @@ refuse address-repeat REFUSE_ADDRESS_REPEAT memberAddresses "$members" \
   "def memberAddresses : Addresses := acons $a1 (acons $a2 (acons $a1 anil))"
 # An Arrow-Debreu program without memberAddresses passes check. build refuses it.
 refuse_build addresses-missing REFUSE_ADDRESSES memberAddresses "$root/test/mutants/debreu-no-addresses.esc"
+# A program that states decisionFlip with a table that does not commute with
+# the flip passes check. build refuses it before it writes the output (M7).
+refuse_build flip-table REFUSE_FLIP_TABLE decisionFlip "$root/test/mutants/debreu-flip-table.esc"
 refuse lex-hex-65 LEX_HEX a "$members" 'def a : Nat := 0x10000000000000000000000000000000000000000000000000000000000000000'
 
 if [ "$failures" -eq 0 ]; then echo "refusal.sh: all passed"; exit 0; fi

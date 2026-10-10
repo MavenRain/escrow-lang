@@ -1612,6 +1612,31 @@ static int tally_code(C *c, const Value *classes, size_t i) {
   return decision_code(c, apply(c, rule, tally), "rule G agg (mkTally ...)");
 }
 
+/* M7 (R4): the table row of the flip of row i.  Each class sends its
+ * tallies (r, f, h) to (f, r, h): the digit loop of row_classes gives
+ * (r, f), and the image digit is the rows of the blocks r' < f plus r. */
+static size_t flip_row(const Value *v, size_t i) {
+  size_t image = 0;
+  for (; is_kcons(v); v = v->args[1]) {
+    unsigned long long k = v->args[0]->nat, r = 0;
+    size_t s = rows_from(v->args[1]);
+    unsigned long long f = i / s % class_rows(k);
+    for (; f > k - r; r++)
+      f -= k - r + 1;
+    size_t digit = (size_t)r;
+    for (unsigned long long j = 0; j < f; j++)
+      digit += (size_t)(k - j + 1);
+    image += digit * s;
+  }
+  return image;
+}
+
+/* The flip of a decision code: release (1) and refund (2) swap, and hold
+ * (3) stays. */
+static unsigned char flip_code(unsigned char code) {
+  return code == 3 ? 3 : (unsigned char)(3 - code);
+}
+
 int escrow_table(EscrowChecked *c, const unsigned char **codes, size_t *count) {
   *codes = NULL;
   *count = 0;
@@ -1635,6 +1660,17 @@ int escrow_table(EscrowChecked *c, const unsigned char **codes, size_t *count) {
     return refuse(c, "MEMORY", "table", "does not fit in the arena");
   for (size_t i = 0; i < total; i++)
     out[i] = (unsigned char)tally_code(c, classes, i);
+  /* M7 (R4): a program that states decisionFlip gets a table that commutes
+   * with the flip.  The check runs before the table goes out, so build
+   * writes nothing. */
+  Global *flip = find_global(c, "decisionFlip");
+  int stated = flip != NULL && !flip->prelude;
+  for (size_t i = 0; stated && !c->failed && i < total; i++)
+    if (out[flip_row(classes, i)] != flip_code(out[i])) {
+      char text[64];
+      snprintf(text, sizeof text, "does not commute with table row %zu", i);
+      return refuse(c, "REFUSE_FLIP_TABLE", "decisionFlip", text);
+    }
   *codes = out;
   *count = total;
   return c->failed ? ESCROW_EXIT_REFUSED : ESCROW_EXIT_OK;
