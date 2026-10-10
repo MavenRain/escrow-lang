@@ -166,11 +166,30 @@ expect "check decisionFlip" 0 "ok impossibility" check "$out/flip.esc"
 expect "check decisionFlip after memberClasses" 0 "ok impossibility" check "$out/flip-classes.esc"
 refuse "mutant debreu decisionFlip identity" REFUSE_FLIP_FORM decisionFlip \
   "must map release to refund, refund to release and hold to hold" check "$root/test/mutants/debreu-flip-identity.esc"
-# A stated decisionFlip keeps a table that commutes with the flip. The
-# mutant gives release at the tie (1, 1, 1), and the flip sends row 5 to row 5.
-awk 'NR==2 {print "def decisionFlip : Decision -> Decision := flipDecision"} {print}' \
-  "$programs/arrow-debreu.esc" > "$out/flip-debreu.esc"
-expect "table arrow-debreu with decisionFlip" 0 "debreu 3 3 3 2 2 3 3 2 1 1 1" table "$out/flip-debreu.esc"
+# A stated decisionFlip keeps a table that commutes with the flip. The three
+# programs state it (M7 chunk 4), so the check and table rows above use the
+# flip. A copy without the declaration gives the same table. The identity in
+# its place is REFUSE_FLIP_FORM, so each program states the declaration that
+# the checker reads. The mutant gives release at the tie (1, 1, 1), and the
+# flip sends row 5 to row 5.
+awk '!/^def decisionFlip /' "$programs/arrow-debreu.esc" > "$out/noflip-debreu.esc"
+awk '!/^def decisionFlip /' "$root/test/fixtures/two-classes.esc" > "$out/noflip-classes.esc"
+awk '!/^def decisionFlip /' "$programs/council.esc" > "$out/noflip-council.esc"
+expect "table arrow-debreu without decisionFlip" 0 "debreu 3 3 3 2 2 3 3 2 1 1 1" table "$out/noflip-debreu.esc"
+expect "table two-classes without decisionFlip" 0 "debreu 3 3 3 3 3 2 3 2 2 2 3 3 1 3 2 1 1 1 1" \
+  table "$out/noflip-classes.esc"
+expect "table council without decisionFlip" 0 \
+  "debreu 4 3 3 2 3 3 1 3 3 2 3 3 1 2 2 2 2 2 2 3 3 2 3 3 1 3 3 2 3 3 1 1 1 1 1 1 1" table "$out/noflip-council.esc"
+idflip='/^def decisionFlip /{$0 = "def decisionFlip : Decision -> Decision := fun (d : Decision) => d"} {print}'
+awk "$idflip" "$programs/arrow-debreu.esc" > "$out/idflip-debreu.esc"
+awk "$idflip" "$root/test/fixtures/two-classes.esc" > "$out/idflip-classes.esc"
+awk "$idflip" "$programs/council.esc" > "$out/idflip-council.esc"
+refuse "arrow-debreu with the identity as decisionFlip" REFUSE_FLIP_FORM decisionFlip \
+  "must map release to refund, refund to release and hold to hold" check "$out/idflip-debreu.esc"
+refuse "two-classes with the identity as decisionFlip" REFUSE_FLIP_FORM decisionFlip \
+  "must map release to refund, refund to release and hold to hold" check "$out/idflip-classes.esc"
+refuse "council with the identity as decisionFlip" REFUSE_FLIP_FORM decisionFlip \
+  "must map release to refund, refund to release and hold to hold" check "$out/idflip-council.esc"
 refuse "mutant debreu flip table" REFUSE_FLIP_TABLE decisionFlip "does not commute with table row 5" \
   table "$root/test/mutants/debreu-flip-table.esc"
 refuse "verdicts of a name that is not a ChoiceRule" VERDICT_TYPE agg "agg is not a ChoiceRule" \

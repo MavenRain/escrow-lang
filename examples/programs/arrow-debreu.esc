@@ -1,4 +1,5 @@
 def members : Nat := 3
+def decisionFlip : Decision -> Decision := flipDecision
 -- Arrow-Debreu regime (SPEC section 6).  The constitution factors through
 -- `orbit`, so the program writes its aggregation and uses cast, settle and
 -- amend.  `H` is plurality by `natLt`: a strict maximum wins, and a tie

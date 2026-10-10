@@ -1,5 +1,6 @@
 def members : Nat := 4
 def memberClasses : Classes := kcons 2 (kcons 2 knil)
+def decisionFlip : Decision -> Decision := flipDecision
 -- A council with two member classes (M6).  Members 1 and 2 are the board
 -- (class 1), and members 3 and 4 are the delegates (class 2).  The regime
 -- is Arrow-Debreu (SPEC section 6): the constitution factors through
