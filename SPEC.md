@@ -1,7 +1,8 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M8 done (the two proofs of section 4.1 at the
-member classes of M6; section 10). M6 closed O2 for member classes. M5
+Status: draft, milestone M9 done (the proofs in escrow-lang with the verb
+`prove`; section 9 O15 and section 10). M8 gave the two proofs of section
+4.1 at the member classes of M6. M6 closed O2 for member classes. M5
 gave a proof of section 4.1 (O1 CLOSED), and M7 gave a proof of the flip
 fact of section 4.1 (O14 CLOSED, the decision flip).
 `escrow-lang` is a working name.
@@ -150,8 +151,9 @@ The prelude defines `tallyOf` (by `foldBallots`), `total`, `classTallyOf`,
 gives one count triple for each class. `Config` states
 `totals (classTallyOf memberClasses xs) = members`, so `orbit` reuses that
 proof: `orbit (mkConfig xs e) = mkTally (classTallyOf memberClasses xs) e`.
-A proof of `total (tallyOf xs) = length xs` for an open `xs` is not
-possible: `natAdd` reduces only on literals (probe-forced). `orbit` is the
+In programs checked by `escrowc check` or `escrowc build`, a proof of
+`total (tallyOf xs) = length xs` for an open `xs` is not possible:
+`natAdd` reduces only on literals (probe-forced). `orbit` is the
 orbit projection onto valid class tallies. The source `Tally` constructor
 checks only `totals ts = members`; it does not check the number of triples
 or each class total. For classes `(2, 1)`, for example,
@@ -179,8 +181,12 @@ triple and keeps the hold count. `flipTallies` applies `swapT3` to each
 class tally (structural recursion on `Tallies`). The prelude has no flip on
 `Config` or `Tally`. A flip on `Config` needs a proof that the class totals
 of the flipped ballots equal `members`, by induction on an open list.
-`natAdd` reduces only on literals, and `fold` is the only recursion (O9).
-Thus the proof of the flip fact is in mechanism-lang (section 4.1).
+In programs checked by `escrowc check` or `escrowc build`, `natAdd` reduces
+only on literals, and `fold` is the only recursion (O9). Thus the proof of
+the flip fact is in mechanism-lang
+(section 4.1). M9 proves the exchange on `Nat` and the flip on `Tally` in
+the prove file `proofs/O14.esc`, with induction on `Nat` (section 9 O15).
+escrow-lang still has no flip on `Config` (USER ruling c).
 `escrowc` checks the declaration in the prelude, just after `flipDecision`.
 Its type must convert to `Decision -> Decision`, and its body must map
 release, refund and hold to refund, release and hold. A wrong type, a
@@ -494,6 +500,15 @@ commutes with the flip exactly when `L` does on the image of `orbit`.
   deposits stay in the contract (design section 4).
 - Proof terms erase. Each guard is checked and its witness is dropped.
 
+`escrowc prove FILE` (M9) checks a proof file, for example
+`proofs/O14.esc`. It checks each definition with the proof rules of
+section 9 O15: a `def rec` with a `match` on `Nat` is structural
+induction, and the fields of `EqNat` are proof-irrelevant. A file still
+may not declare `mu` (`REFUSE_MU`). On a pass, the first line of output is
+`ok debreu` or `ok impossibility`, according to the file's regime
+(section 6). `escrowc check` refuses a file with a `def rec`
+(`REFUSE_REC`), thus a proof file with induction is prove-only.
+
 ## 8. Host and target
 
 USER rulings 2026-10-07 replace the assay host of 2026-10-06. The host
@@ -509,13 +524,15 @@ facts are in `probe/CAPABILITY.md`.
 - The checker (`src/check.c`) checks by normalization: Pi, Sigma, `*`
   products, `sum` and `case`, fixed-index `mu` families with `match`,
   structural `def rec`, `Type 0` and `Type 1`, erased binders and the
-  `Nat` builtins on literals. Conversion compares normal forms.
+  `Nat` builtins on literals. In prove files, `natAdd` also reduces on
+  open terms (section 9 O15). Conversion compares normal forms.
 - The prelude (`prelude/Prelude.esc`, eight `-- @section` parts) defines
   the forms of section 3 and the types and operations of sections 4 and 5
   (O8 RULED 2026-10-06): `EqNat`, `EqDec`, `EqTally`, `Decision`,
   `Ballots`, `Claims`, `Config`, `Tally` and `Aggregation` as `mu`
   families in `Type 0`, and `Option` and `Sum` as type functions over
-  `sum (..)`. Only the prelude uses `mu` and `def rec`. `make` embeds the
+  `sum (..)`. Only the prelude uses `mu`. The prelude and the proof files
+  of `escrowc prove` use `def rec` (section 7). `make` embeds the
   prelude in `escrowc` (`tools/embed.c` writes `build/prelude.c`).
 - The surface has no implicit arguments, so each prelude name takes its
   type arguments explicitly.
@@ -530,6 +547,9 @@ facts are in `probe/CAPABILITY.md`.
     ballot outermost), up to 10 members (`VERDICT_LIMIT`).
   - `escrowc eval PROG NAME` prints the normal form of NAME.
   - `escrowc build PROG [--runtime] -o OUT` writes the contract (section 7).
+  - `escrowc prove FILE` checks a proof file and prints `ok debreu` or
+    `ok impossibility` as the first line on a pass, according to the
+    file's regime (section 7).
 - The surface has no axiom form that a program can use (section 2), so a
   checked program has no unproved fact.
 
@@ -594,7 +614,11 @@ facts are in `probe/CAPABILITY.md`.
 - O9. `unfold` has no structural measure. Built-in `Nat` has no
   eliminator, so fuel cannot be a `Nat`, and the prelude invents no fuel.
   The prelude has no `unfold`. RULED 2026-10-06 (USER): drop `unfold`.
-  Recursion comes only from `fold` (section 2).
+  Recursion comes only from `fold` (section 2). M9 note (2026-10-10): in
+  a prove file (section 7), `Nat` has a `match` in a `def rec`, and this
+  match is structural induction. `escrowc check` and `escrowc build`
+  refuse `def rec` (`REFUSE_REC`), thus `fold` stays the only recursion in
+  the programs that they accept.
 - O10. Probe-forced (M0, 2026-10-06): the assay kernel refused
   `fun (s : S) => (s.1, s.2)` for `S := (n : Nat) * EqNat n 3`, and assay
   has no Sigma pattern. Thus `Config`, `Tally` and `Aggregation F` are `mu`
@@ -652,6 +676,28 @@ facts are in `probe/CAPABILITY.md`.
   (done, section 10) proves the flip fact at the member classes of M6:
   mechanism-lang commit `0ea38a9`, `examples/escrow-classes/O14C.mech`
   (section 4.1).
+- O15. M9: proofs in escrow-lang (done 2026-10-10, section 10). The verb
+  `escrowc prove FILE` checks a proof file (section 7). In a prove file, a
+  `def rec` with a `match` on `Nat` is structural induction, and the
+  fields of `EqNat` are proof-irrelevant (kernel commit `553f3dc`).
+  `natAdd` also reduces on open terms: `natAdd x 0` reduces to `x`, and
+  `natAdd x (natAdd y 1)` reduces to `natAdd (natAdd x y) 1`.
+  `proofs/O1.esc` (commit `5714d64`) proves O1 at the prelude `Config`
+  and `Tally`. `proofs/O14.esc` (commit `6184c8d`) proves the exchange
+  `a + (b + c) = b + (a + c)` on `Nat` (`exchNat`, by induction on `c`),
+  the flip on `Tally` (`flipT`), its involution (`flipTInv`) and the flip
+  fact in both directions (`flipFwd`, `flipBwd`). `escrowc check` refuses
+  `def rec` (`REFUSE_REC`), thus `proofs/O14.esc` is a prove-only file.
+  The limit (USER ruling c, 2026-10-10): escrow-lang has no flip on
+  `Config`. `flipFwd` and `flipBwd` take a function
+  `fC : Config -> Config` and the hypothesis
+  `oF : (x : Config) -> EqTally (orbit (fC x)) (flipT (orbit x))`, the
+  `orbitFlip` of section 4.1. The reason: `classTallyOf` calls
+  `takeTally`, and `takeTally` splits on `case natLt j k`. `case` is not
+  dependent, and `natLt` does not reduce on an open `Nat`. Thus the
+  kernel cannot do this split on open terms. The mechanism-lang proofs of
+  section 4.1 (M7 and M8) have a flip on configurations, and they prove
+  `orbitFlip`.
 
 
 ## 10. Milestones
@@ -805,10 +851,20 @@ facts are in `probe/CAPABILITY.md`.
   sections 4 to 7 over abstract types, used at `Config n` and at
   `CConfig m cs`); chunk 3 `0ea38a9` (`O14C.mech`: the flip at `cs`,
   `corbitFlip` and the flip fact; `README.md`); chunk 4 in escrow-lang
-  (the documents: section 4.1, O1, O14 and this section).
+  `b656cf1` (the documents: section 4.1, O1, O14 and this section).
   `probe/CAPABILITY.md` does not give the one-class limit of the proofs,
   thus it does not change. The join of section 4.1 (1302 lines) checks
   with exit 0, and `axioms` gives exit 0 and no output. The escrow-lang
   counts are the counts of M7: `make test` gives 151 ok,
   `test/settlement.py` gives `cases=148 deploy=2`, and the 14-member
   build gives 2170 bytes and 120 codes.
+- M9: proofs in escrow-lang. Done 2026-10-10. Chunk 1 `553f3dc` (kernel):
+  the verb `prove`, structural induction on `Nat` in a prove file, and
+  proof irrelevance for `EqNat` (section 7). Chunk 2 `5714d64`:
+  `proofs/O1.esc`, O1 at the prelude `Config` and `Tally`. Chunk 3
+  `6184c8d`: `proofs/O14.esc`, the exchange, the flip on `Tally` and the
+  flip fact in both directions, with the flip on `Config` and `orbitFlip`
+  as hypotheses (USER ruling c, section 9 O15). Chunk 4: the documents
+  (section 4, section 7, O9, O15 and this section). The prelude does not
+  change. `make test` gives 167 ok, `test/settlement.py` gives
+  `cases=148`, and the 14-member build gives 2170 bytes.
