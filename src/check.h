@@ -40,6 +40,12 @@ typedef struct EscrowChecked EscrowChecked;
  * while *CHECKED is used. */
 int escrow_check(Arena *arena, const Program *prelude, const Program *program,
                  EscrowChecked **checked, Diag *diag);
+
+/* escrow_check_as is escrow_check with the verb flag. PROVE is 1 for the
+ * verb prove (M9): the program may declare def rec. escrow_check is
+ * escrow_check_as with PROVE 0. */
+int escrow_check_as(Arena *arena, const Program *prelude, const Program *program, int prove,
+                    EscrowChecked **checked, Diag *diag);
 EscrowRegime escrow_regime(const EscrowChecked *checked);
 unsigned escrow_members(const EscrowChecked *checked);
 

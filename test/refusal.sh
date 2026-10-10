@@ -90,6 +90,9 @@ refuse erased-projection TYPE_ERASED f "$members" \
   'def f : (p : (0 n : Nat) * Nat) -> Nat := fun (p : (0 n : Nat) * Nat) => p.0'
 refuse match-family TYPE_MATCH x "$members" 'def x : Nat := match release as d in Ballots return Nat with | bnil => 0 | bcons h t => 1'
 refuse match-arms TYPE_MATCH x "$members" 'def x : Nat := match release as d in Decision return Nat with | release => 0 | refund => 1'
+# M9 chunk 1: the prove fixtures under check keep the old refusals.
+refuse prove-nat-check REFUSE_REC dbl "$(cat "$root/test/fixtures/prove-nat.esc")"
+refuse nat-match-check TYPE_MATCH predNat "$(cat "$root/test/fixtures/nat-match.esc")"
 refuse nat-overflow TYPE_NAT x "$members" 'def x : Nat := natAdd 18446744073709551615 1'
 
 # memberAddresses (M4): the length must be members, each address below

@@ -1,0 +1,32 @@
+-- M9 chunk 1: proofs by induction on Nat (verb prove).  The def rec is
+-- first, thus `check` refuses it with REFUSE_REC.
+def members : Nat := 3
+
+def rec dbl : Nat -> Nat := fun (n : Nat) =>
+  match n as q in Nat return Nat with
+  | zero => 0
+  | succ k => natAdd (dbl k) 2
+
+def dblThree : EqNat (dbl 3) 6 := reflNat 6
+
+def predNat : Nat -> Nat := fun (n : Nat) =>
+  match n as q in Nat return Nat with
+  | zero => 0
+  | succ k => k
+
+def predFive : EqNat (predNat 5) 4 := reflNat 4
+
+def rec addZeroR : (x : Nat) -> EqNat (natAdd x 0) x := fun (n : Nat) =>
+  match n as q in Nat return EqNat (natAdd q 0) q with
+  | zero => reflNat 0
+  | succ k => congNat (fun (m : Nat) => natAdd m 1) (natAdd k 0) k (addZeroR k)
+
+def rec addZeroL : (x : Nat) -> EqNat (natAdd 0 x) x := fun (n : Nat) =>
+  match n as q in Nat return EqNat (natAdd 0 q) q with
+  | zero => reflNat 0
+  | succ k => congNat (fun (m : Nat) => natAdd m 1) (natAdd 0 k) k (addZeroL k)
+
+-- Proof irrelevance (form 1): two Tally values with the same tallies are
+-- equal, whatever proof each one holds.
+def tallyIrr : (ts : Tallies) -> (e1 : EqNat (totals ts) members) -> (e2 : EqNat (totals ts) members) -> EqTally (mkTally ts e1) (mkTally ts e2) :=
+  fun (ts : Tallies) (e1 : EqNat (totals ts) members) (e2 : EqNat (totals ts) members) => reflTally (mkTally ts e1)

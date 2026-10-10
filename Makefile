@@ -26,11 +26,15 @@ build/parsetool: $(FRONT) test/parsetool.c $(HEADERS) build/prelude.c
 build/flip-form: $(FRONT) src/check.c test/flip-form.c $(HEADERS) build/prelude.c
 	$(TCC) $(TCCFLAGS) -o $@ $(FRONT) src/check.c test/flip-form.c build/prelude.c
 
+build/prove-check: $(FRONT) src/check.c test/prove-check.c $(HEADERS) build/prelude.c
+	$(TCC) $(TCCFLAGS) -o $@ $(FRONT) src/check.c test/prove-check.c build/prelude.c
+
 check-clang: build/prelude.c
 	$(CLANG) $(CLANGFLAGS) src/*.c test/*.c tools/*.c build/prelude.c
 
-test: build/escrowc build/parsetool build/flip-form
+test: build/escrowc build/parsetool build/flip-form build/prove-check
 	build/flip-form
+	build/prove-check
 	sh test/parse.sh
 	sh test/check.sh
 	sh test/refusal.sh

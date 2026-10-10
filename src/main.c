@@ -1,5 +1,6 @@
 /* escrowc, the escrow-lang compiler (PLAN.md):
  *   escrowc check PROG                    ok debreu | ok impossibility
+ *   escrowc prove PROG                    as check; the program may declare def rec (M9)
  *   escrowc table PROG                    REGIME MEMBERS [CODES...]
  *   escrowc verdicts PROG NAME            one digit per ballot vector
  *   escrowc eval PROG NAME                the normal form of NAME
@@ -12,7 +13,7 @@
 #include <errno.h>
 #include <string.h>
 
-typedef enum { VERB_CHECK, VERB_TABLE, VERB_VERDICTS, VERB_EVAL, VERB_BUILD } VerbKind;
+typedef enum { VERB_CHECK, VERB_PROVE, VERB_TABLE, VERB_VERDICTS, VERB_EVAL, VERB_BUILD } VerbKind;
 
 typedef struct {
   const char *name;
@@ -21,12 +22,12 @@ typedef struct {
 } Verb;
 
 static const Verb VERBS[] = {
-  {"check", VERB_CHECK, 3}, {"table", VERB_TABLE, 3}, {"verdicts", VERB_VERDICTS, 4},
+  {"check", VERB_CHECK, 3}, {"prove", VERB_PROVE, 3}, {"table", VERB_TABLE, 3}, {"verdicts", VERB_VERDICTS, 4},
   {"eval", VERB_EVAL, 4}, {"build", VERB_BUILD, 5}
 };
 
 static int usage(void) {
-  fputs("escrowc: USAGE: -: escrowc check|table PROG, escrowc verdicts|eval PROG NAME,"
+  fputs("escrowc: USAGE: -: escrowc check|prove|table PROG, escrowc verdicts|eval PROG NAME,"
         " escrowc build PROG [--runtime] -o OUT\n", stderr);
   return ESCROW_EXIT_USAGE;
 }
@@ -102,6 +103,7 @@ static int verb_build(EscrowChecked *checked, Diag *diag, int argc, char **argv)
 static int run_verb(EscrowChecked *checked, const Verb *verb, Diag *diag, int argc, char **argv) {
   switch (verb->kind) {
   case VERB_CHECK:
+  case VERB_PROVE:
     printf("ok %s\n", regime_name(checked));
     return ESCROW_EXIT_OK;
   case VERB_TABLE: return verb_table(checked);
@@ -129,7 +131,7 @@ static int run(Arena *arena, const Verb *verb, Diag *diag, int argc, char **argv
   if (status != ESCROW_EXIT_OK)
     return status;
   EscrowChecked *checked = NULL;
-  status = escrow_check(arena, &prelude, &program, &checked, diag);
+  status = escrow_check_as(arena, &prelude, &program, verb->kind == VERB_PROVE, &checked, diag);
   if (status != ESCROW_EXIT_OK)
     return status;
   return run_verb(checked, verb, diag, argc, argv);

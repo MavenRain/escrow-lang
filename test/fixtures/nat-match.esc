@@ -1,0 +1,10 @@
+-- M9 chunk 1: a match on Nat without a def rec.  `check` refuses it with
+-- TYPE_MATCH; `prove` accepts it.
+def members : Nat := 3
+
+def predNat : Nat -> Nat := fun (n : Nat) =>
+  match n as q in Nat return Nat with
+  | zero => 0
+  | succ k => k
+
+def predFive : EqNat (predNat 5) 4 := reflNat 4

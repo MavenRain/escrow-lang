@@ -68,6 +68,9 @@ expect "check debreu with two member classes" 0 "ok debreu" \
 # chunk 2). Above 128 rows, table refuses REFUSE_TABLE_SIZE.
 expect "table debreu with two member classes" 0 "debreu 3 3 3 3 3 2 3 2 2 2 3 3 1 3 2 1 1 1 1" \
   table "$root/test/fixtures/two-classes.esc"
+# prove (M9 chunk 1): Nat matches, def rec on Nat, induction proofs and the
+# proof-irrelevant Tally field check.
+expect "prove nat induction" 0 "ok impossibility" prove "$root/test/fixtures/prove-nat.esc"
 refuse "table debreu with 14 members in two classes" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \
   table "$root/test/fixtures/two-classes-14.esc"
 refuse "table debreu with 14 classes of one member" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \

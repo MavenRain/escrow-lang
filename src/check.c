@@ -28,7 +28,7 @@ typedef struct Names Names;
 
 typedef enum {
   V_TYPE, V_NAT_TYPE, V_NAT, V_ADDR_TYPE, V_ADDR, V_PI, V_SIGMA, V_LAM, V_PAIR, V_TUPLE, V_UNIT,
-  V_PROD0, V_PROD, V_SUM, V_INJ, V_DATA, V_CON, V_NEU
+  V_PROD0, V_PROD, V_SUM, V_INJ, V_DATA, V_CON, V_NEU, V_SUCC
 } ValueKind;
 
 typedef enum { G_DEF, G_REC, G_MU, G_CTOR, G_PRIM } GlobalKind;
@@ -54,11 +54,11 @@ struct Frame {
 
 struct Value {
   ValueKind kind;
-  unsigned long long nat;  /* V_TYPE level, V_NAT, V_INJ tag */
+  unsigned long long nat;  /* V_TYPE level, V_NAT, V_INJ tag, V_SUCC offset (>= 1) */
   const unsigned char *addr; /* V_ADDR: 32 bytes, big-endian */
   const char *name;        /* V_PI, V_SIGMA binder; V_NEU variable */
   int erased;              /* V_PI, V_SIGMA */
-  Value *left;             /* V_PI, V_SIGMA domain; V_PAIR, V_TUPLE, V_PROD, V_SUM; V_INJ value */
+  Value *left;             /* V_PI, V_SIGMA domain; V_PAIR, V_TUPLE, V_PROD, V_SUM; V_INJ value; V_SUCC neutral */
   Value *right;            /* V_PAIR, V_TUPLE, V_PROD, V_SUM; V_PI codomain of a builtin arrow */
   Bind *env;               /* V_PI, V_SIGMA, V_LAM closure */
   const Ast *body;         /* V_PI, V_SIGMA codomain (NULL for a builtin arrow); V_LAM node */
@@ -82,6 +82,7 @@ struct Global {
   size_t index;       /* G_CTOR: the position in its mu */
   Global *family;     /* G_CTOR */
   Value *body;        /* G_REC: the lambda chain, once checked */
+  int *irrelevant;    /* G_CTOR: 1 for a field of type EqNat */
   Global *next;
 };
 
@@ -96,6 +97,7 @@ struct EscrowChecked {
   Arena *arena;
   Diag *diag;
   int failed;
+  int prove;        /* the verb prove (M9) */
   long fuel;
   int depth;
   const char *file;
@@ -305,11 +307,46 @@ static Bind *bind_args(C *c, Bind *env, const MatchArm *arm, Value **args) {
   return env;
 }
 
+static Value *mk_succ(C *c, Value *base, unsigned long long k) {
+  Value *v = mk_two(c, V_SUCC, base, NULL);
+  v->nat = k;
+  return v;
+}
+
+/* Under prove, natAdd a k for a literal k >= 1: a literal gives a literal, a
+ * neutral x gives the offset form x + k (V_SUCC). */
+static Value *add_offset(C *c, Value *a, unsigned long long k, Value *stuck) {
+  switch (a->kind) {
+  case V_NAT:
+  case V_SUCC:
+    if (a->nat > ULLONG_MAX - k)
+      return fail(c, "TYPE_NAT", c->loc, "natAdd %llu %llu overflows", a->nat, k);
+    return a->kind == V_NAT ? mk_nat(c, a->nat + k) : mk_succ(c, a->left, a->nat + k);
+  case V_NEU: return mk_succ(c, a, k);
+  case V_TYPE: case V_NAT_TYPE: case V_ADDR_TYPE: case V_ADDR: case V_PI: case V_SIGMA: case V_LAM:
+  case V_PAIR: case V_TUPLE: case V_UNIT: case V_PROD0: case V_PROD: case V_SUM: case V_INJ:
+  case V_DATA: case V_CON: break;
+  }
+  return stuck;
+}
+
+/* Under prove, a match on Nat: no predecessor selects zero, else succ. */
+static Value *nat_match(C *c, Value *pred, Bind *env, const Ast *t) {
+  const MatchArm *arm = find_arm(t, pred == NULL ? "zero" : "succ");
+  if (arm == NULL || arm->nvars != (size_t)(pred != NULL))
+    return fail(c, "TYPE_INTERNAL", t->loc, "a match with no arm for its value");
+  return eval(c, pred == NULL ? env : bind(c, env, arm->vars[0].name, pred, NULL, 0), arm->body);
+}
+
 static Value *do_match(C *c, Value *v, Bind *env, const Ast *t) {
   if (c->failed)
     return &c->bad;
   if (v->kind == V_NEU)
     return push(c, v, frame(c, F_MATCH, env, t));
+  if (c->prove && v->kind == V_NAT)
+    return nat_match(c, v->nat == 0 ? NULL : mk_nat(c, v->nat - 1), env, t);
+  if (c->prove && v->kind == V_SUCC)
+    return nat_match(c, v->nat == 1 ? v->left : mk_succ(c, v->left, v->nat - 1), env, t);
   const MatchArm *arm = v->kind == V_CON ? find_arm(t, v->global->name) : NULL;
   if (arm == NULL || arm->nvars != v->nargs)
     return fail(c, "TYPE_INTERNAL", t->loc, "a match with no arm for its value");
@@ -377,7 +414,21 @@ static Value *eval(C *c, Bind *env, const Ast *t) {
   return v;
 }
 
+/* Under prove, natAdd on open terms: x + 0 is x, x + k is the offset form,
+ * and x + (y + k) is (x + y) + k with x + y stuck. */
+static Value *peano_add(C *c, Value *a, Value *b, Value *stuck) {
+  if (b->kind == V_NAT && b->nat == 0)
+    return a;
+  if (b->kind == V_NAT)
+    return add_offset(c, a, b->nat, stuck);
+  if (b->kind == V_SUCC)
+    return add_offset(c, apply(c, apply(c, stuck->global->value, a), b->left), b->nat, stuck);
+  return stuck;
+}
+
 static Value *prim(C *c, Prim p, Value *a, Value *b, Value *stuck) {
+  if (c->prove && p == P_ADD && (a->kind != V_NAT || b->kind != V_NAT))
+    return peano_add(c, a, b, stuck);
   if (a->kind != V_NAT || b->kind != V_NAT)
     return stuck;
   switch (p) {
@@ -394,7 +445,8 @@ static Value *prim(C *c, Prim p, Value *a, Value *b, Value *stuck) {
 
 static Value *unfold(C *c, Global *g, Value **args, Value *stuck) {
   Value *d = args[g->decreasing];
-  if (g->body == NULL || d->kind != V_CON || d->nargs != d->global->arity)
+  int nat = c->prove && (d->kind == V_NAT || d->kind == V_SUCC);
+  if (g->body == NULL || (!nat && (d->kind != V_CON || d->nargs != d->global->arity)))
     return stuck;
   Value *v = g->body;
   for (size_t i = 0; i < g->arity; i++)
@@ -457,7 +509,7 @@ static Value *apply_body(C *c, Value *f, Value *a) {
   }
   case V_TYPE: case V_NAT_TYPE: case V_NAT: case V_ADDR_TYPE: case V_ADDR: case V_PI: case V_SIGMA:
   case V_PAIR: case V_TUPLE:
-  case V_UNIT: case V_PROD0: case V_PROD: case V_SUM: case V_INJ: break;
+  case V_UNIT: case V_PROD0: case V_PROD: case V_SUM: case V_INJ: case V_SUCC: break;
   }
   return fail(c, "TYPE_INTERNAL", c->loc, "an application of a value that is not a function");
 }
@@ -492,11 +544,16 @@ static int conv_closure(C *c, Value *a, Value *b, int lvl) {
   return conv(c, instantiate(c, a, x), instantiate(c, b, x), lvl + 1);
 }
 
+/* Under prove, two proofs of one EqNat are equal: conversion skips the field. */
+static int proof_field(const C *c, const Global *g, size_t i) {
+  return c->prove && g->kind == G_CTOR && g->irrelevant != NULL && g->irrelevant[i];
+}
+
 static int conv_args(C *c, const Value *a, const Value *b, int lvl) {
   size_t i = 0;
   if (a->nargs != b->nargs)
     return 0;
-  while (i < a->nargs && conv(c, a->args[i], b->args[i], lvl))
+  while (i < a->nargs && (proof_field(c, a->global, i) || conv(c, a->args[i], b->args[i], lvl)))
     i++;
   return i == a->nargs;
 }
@@ -570,7 +627,8 @@ static int conv_body(C *c, Value *a, Value *b, int lvl) {
   case V_SIGMA: return a->erased == b->erased && conv(c, a->left, b->left, lvl) && conv_closure(c, a, b, lvl);
   case V_PROD:
   case V_SUM: return conv(c, a->left, b->left, lvl) && conv(c, a->right, b->right, lvl);
-  case V_INJ: return a->nat == b->nat && conv(c, a->left, b->left, lvl);
+  case V_INJ:
+  case V_SUCC: return a->nat == b->nat && conv(c, a->left, b->left, lvl);
   case V_DATA:
   case V_CON: return a->global == b->global && conv_args(c, a, b, lvl);
   case V_NEU: return a->level == b->level && a->global == b->global && conv_frames(c, a->spine, b->spine, lvl);
@@ -775,6 +833,11 @@ static Ast *quote_body(C *c, Value *v, int lvl) {
   case V_DATA:
   case V_CON: return quote_args(c, v, lvl);
   case V_NEU: return quote_spine(c, v, v->spine, lvl);
+  case V_SUCC: {
+    Ast *k = node(c, AST_NAT);
+    k->u.nat = v->nat;
+    return app_node(c, app_node(c, var_node(c, "natAdd"), quote(c, v->left, lvl)), k);
+  }
   }
   return &c->bad_ast;
 }
@@ -904,11 +967,30 @@ static void check_match_arm(C *c, Bind *ctx, int lvl, const Ast *t, const MatchA
   check(c, inner, l, arm->body, motive_at(c, ctx, t, ty->args, con), relevant);
 }
 
+/* Under prove, a match on Nat has the arms zero and succ k; the motive gets 0
+ * and natAdd k 1. */
+static Value *infer_nat_match(C *c, Bind *ctx, int lvl, const Ast *t, Value *nat, int relevant) {
+  const MatchArm *z = find_arm(t, "zero");
+  const MatchArm *s = find_arm(t, "succ");
+  if (t->u.match.nindices != 0 || t->u.match.narms != 2 || z == NULL || z->nvars != 0 || s == NULL ||
+      s->nvars != 1)
+    return fail(c, "TYPE_MATCH", t->loc, "a match on Nat has the arms zero and succ k");
+  sort_of(c, bind(c, ctx, t->u.match.self, mk_var(c, lvl, t->u.match.self), nat, 1), lvl + 1,
+          t->u.match.motive);
+  check(c, ctx, lvl, z->body, motive_at(c, ctx, t, NULL, mk_nat(c, 0)), relevant);
+  Value *k = mk_var(c, lvl, s->vars[0].name);
+  check(c, bind(c, ctx, s->vars[0].name, k, nat, s->vars[0].erased), lvl + 1, s->body,
+        motive_at(c, ctx, t, NULL, mk_succ(c, k, 1)), relevant);
+  return motive_at(c, ctx, t, NULL, eval(c, ctx, t->u.match.subject));
+}
+
 static Value *infer_match(C *c, Bind *ctx, int lvl, const Ast *t, int relevant) {
   Value *st = infer(c, ctx, lvl, t->u.match.subject, relevant);
   Global *fam = find_global(c, t->u.match.family);
   if (c->failed)
     return &c->bad;
+  if (c->prove && st->kind == V_NAT_TYPE && same(t->u.match.family, "Nat"))
+    return infer_nat_match(c, ctx, lvl, t, st, relevant);
   if (fam == NULL || fam->kind != G_MU || st->kind != V_DATA || st->global != fam ||
       t->u.match.nindices != fam->arity || st->nargs != fam->arity)
     return fail(c, "TYPE_MATCH", t->loc, "the subject is not of the family %s with %zu indices",
@@ -1236,6 +1318,13 @@ static Bind *check_field(C *c, const Global *fam, Bind *ctx, int lvl, const Bind
   return bind(c, ctx, b->name, mk_var(c, lvl, b->name), eval(c, ctx, b->type), b->erased);
 }
 
+/* 1 when a field type is EqNat applied to its indices. */
+static int is_eq_nat(const Ast *t) {
+  while (t->kind == AST_APP)
+    t = t->u.app.fun;
+  return t->kind == AST_VAR && same(t->u.name, "EqNat");
+}
+
 static void check_ctor(C *c, Global *fam, const Ctor *k, size_t index, unsigned level) {
   if (find_global(c, k->name) != NULL) {
     fail(c, "TYPE_DUPLICATE", k->loc, "%s is declared already", k->name);
@@ -1256,6 +1345,10 @@ static void check_ctor(C *c, Global *fam, const Ctor *k, size_t index, unsigned 
   g->index = index;
   g->arity = (size_t)lvl;
   g->value = mk_global(c, V_CON, g);
+  g->irrelevant = alloc(c, (g->arity + 1) * sizeof *g->irrelevant);
+  t = k->type;
+  for (size_t i = 0; i < g->arity && !c->failed; i++, t = t->u.bind.body)
+    g->irrelevant[i] = is_eq_nat(t->u.bind.binder.type);
 }
 
 static void check_mu(C *c, const Decl *d) {
@@ -1283,8 +1376,8 @@ static void check_def(C *c, const Decl *d, int prelude) {
   g->value = eval(c, NULL, d->body);
 }
 
-static void check_rec(C *c, const Decl *d) {
-  Global *g = add_global(c, d->name, G_REC, closed_type(c, d->type), 1);
+static void check_rec(C *c, const Decl *d, int prelude) {
+  Global *g = add_global(c, d->name, G_REC, closed_type(c, d->type), prelude);
   g->decl = d;
   g->value = mk_global(c, V_NEU, g);
   structural(c, g, d);
@@ -1304,7 +1397,7 @@ static void check_decl(C *c, const Program *p, size_t i, int prelude) {
     fail(c, "REFUSE_MU", d->loc, "a program may not declare mu %s; mu lives in the prelude", d->name);
     return;
   }
-  if (!prelude && d->kind == DECL_REC) {
+  if (!prelude && !c->prove && d->kind == DECL_REC) {
     fail(c, "REFUSE_REC", d->loc, "a program may not declare def rec %s; recursion lives in the prelude",
          d->name);
     return;
@@ -1317,7 +1410,7 @@ static void check_decl(C *c, const Program *p, size_t i, int prelude) {
   }
   switch (d->kind) {
   case DECL_DEF: check_def(c, d, prelude); return;
-  case DECL_REC: check_rec(c, d); return;
+  case DECL_REC: check_rec(c, d, prelude); return;
   case DECL_MU: check_mu(c, d); return;
   }
 }
@@ -1496,7 +1589,7 @@ static void find_regime(C *c) {
    * the checked family index rather than requiring a literal annotation. */
   if (ty != NULL && ty->kind == V_DATA && ty->global == family && ty->nargs == 1 && choice != NULL) {
     for (Global *g = c->globals; g != NULL && rule == NULL && !c->failed; g = g->next)
-      if (!g->prelude && g->kind == G_DEF && conv(c, g->type, choice->value, 0) &&
+      if (!g->prelude && (g->kind == G_DEF || g->kind == G_REC) && conv(c, g->type, choice->value, 0) &&
           conv(c, g->value, ty->args[0], 0))
         rule = g;
   }
@@ -1506,8 +1599,8 @@ static void find_regime(C *c) {
   c->agg = agg;
 }
 
-int escrow_check(Arena *arena, const Program *prelude, const Program *program, EscrowChecked **checked,
-                 Diag *diag) {
+int escrow_check_as(Arena *arena, const Program *prelude, const Program *program, int prove,
+                    EscrowChecked **checked, Diag *diag) {
   C *c = arena_alloc(arena, sizeof *c);
   if (c == NULL) {
     diag_set(diag, "MEMORY", span_of("-"), "the arena is full");
@@ -1516,6 +1609,7 @@ int escrow_check(Arena *arena, const Program *prelude, const Program *program, E
   c->arena = arena;
   c->diag = diag;
   c->fuel = CHECK_FUEL;
+  c->prove = prove;
   c->file = program->file;
   c->def = span_of("-");
   c->bad.kind = V_UNIT;
@@ -1539,6 +1633,11 @@ int escrow_check(Arena *arena, const Program *prelude, const Program *program, E
   if (!c->failed && addresses_ok(c))
     find_regime(c);
   return c->failed ? ESCROW_EXIT_REFUSED : ESCROW_EXIT_OK;
+}
+
+int escrow_check(Arena *arena, const Program *prelude, const Program *program,
+                 EscrowChecked **checked, Diag *diag) {
+  return escrow_check_as(arena, prelude, program, 0, checked, diag);
 }
 
 EscrowRegime escrow_regime(const EscrowChecked *checked) { return checked->regime; }
