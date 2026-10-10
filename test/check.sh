@@ -71,6 +71,7 @@ expect "table debreu with two member classes" 0 "debreu 3 3 3 3 3 2 3 2 2 2 3 3 
 # prove (M9 chunk 1): Nat matches, def rec on Nat, induction proofs and the
 # proof-irrelevant Tally field check.
 expect "prove nat induction" 0 "ok impossibility" prove "$root/test/fixtures/prove-nat.esc"
+expect "prove O1" 0 "ok impossibility" prove "$root/proofs/O1.esc"
 refuse "table debreu with 14 members in two classes" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \
   table "$root/test/fixtures/two-classes-14.esc"
 refuse "table debreu with 14 classes of one member" REFUSE_TABLE_SIZE memberClasses "more than 128 table rows" \

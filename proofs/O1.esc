@@ -1,0 +1,80 @@
+-- M9 chunk 2: O1 at the prelude Config, Tally and orbit (verb prove).  Port
+-- of mechanism-lang examples/escrow-classes/O1C.mech sections 1 to 4.  The
+-- section is a hypothesis (USER ruling 2): each def takes s : Tally -> Config
+-- and r : (t : Tally) -> EqTally t (orbit (s t)).  The aggregation is the
+-- prelude Aggregation F, read by rule and cast.  uniq is pointwise.
+def members : Nat := 3
+
+def orbitSec : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (t : Tally) -> EqTally (orbit (s t)) t :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (t : Tally) =>
+    symmTally t (orbit (s t)) (r t)
+
+def descAt : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> (L : Tally -> Decision) -> (t : Tally) -> EqDec (F (s t)) (L (orbit (s t))) -> EqDec (L t) (F (s t)) :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (L : Tally -> Decision) (t : Tally) (e : EqDec (F (s t)) (L (orbit (s t)))) =>
+    transDec (L t) (L (orbit (s t))) (F (s t)) (congTD L t (orbit (s t)) (r t)) (symmDec (F (s t)) (L (orbit (s t))) e)
+
+def facAt : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> (L : Tally -> Decision) -> (G : Tally -> Decision) -> (t : Tally) -> EqDec (F (s t)) (L (orbit (s t))) -> EqDec (F (s t)) (G (orbit (s t))) -> EqDec (L t) (G t) :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (L : Tally -> Decision) (G : Tally -> Decision) (t : Tally) (u : EqDec (F (s t)) (L (orbit (s t)))) (w : EqDec (F (s t)) (G (orbit (s t)))) =>
+    transDec (L t) (L (orbit (s t))) (G t) (congTD L t (orbit (s t)) (r t))
+      (transDec (L (orbit (s t))) (F (s t)) (G t) (symmDec (F (s t)) (L (orbit (s t))) u)
+        (transDec (F (s t)) (G (orbit (s t))) (G t) w (congTD G (orbit (s t)) t (orbitSec s r t))))
+
+-- The local Kan record: the rule L, the unit, desc, fac and uniq (pointwise).
+def Kan : (s : Tally -> Config) -> (F : ChoiceRule) -> Type 0 :=
+  fun (s : Tally -> Config) (F : ChoiceRule) =>
+    (L : Tally -> Decision) *
+    ((u : (x : Config) -> EqDec (F x) (L (orbit x))) *
+    ((d : (t : Tally) -> EqDec (F (s t)) (L (orbit (s t))) -> EqDec (L t) (F (s t))) *
+    ((f : (G : Tally -> Decision) -> (t : Tally) -> EqDec (F (s t)) (L (orbit (s t))) -> EqDec (F (s t)) (G (orbit (s t))) -> EqDec (L t) (G t)) *
+    ((G : Tally -> Decision) -> ((x : Config) -> EqDec (F x) (G (orbit x))) -> (t : Tally) -> EqDec (L t) (G t)))))
+
+def unitOf : (F : ChoiceRule) -> (a : Aggregation F) -> (x : Config) -> EqDec (F x) (rule F a (orbit x)) :=
+  fun (F : ChoiceRule) (a : Aggregation F) (x : Config) => cast F a x
+
+def toKan : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> Aggregation F -> Kan s F :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (a : Aggregation F) =>
+    (rule F a, (unitOf F a, (descAt s r F (rule F a), (facAt s r F (rule F a),
+      fun (G : Tally -> Decision) (v : (x : Config) -> EqDec (F x) (G (orbit x))) (t : Tally) => facAt s r F (rule F a) G t (unitOf F a (s t)) (v (s t))))))
+
+def fromKan : (s : Tally -> Config) -> (F : ChoiceRule) -> Kan s F -> Aggregation F :=
+  fun (s : Tally -> Config) (F : ChoiceRule) (k : Kan s F) => mkAgg F k.0 k.1.0
+
+def mkAggO1 : (F : ChoiceRule) -> (L : Tally -> Decision) -> ((x : Config) -> EqDec (F x) (L (orbit x))) -> Aggregation F :=
+  fun (F : ChoiceRule) (L : Tally -> Decision) (u : (x : Config) -> EqDec (F x) (L (orbit x))) => mkAgg F L u
+
+def tripA : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> (a : Aggregation F) -> (t : Tally) -> EqDec (rule F (fromKan s F (toKan s r F a)) t) (rule F (mkAggO1 F (rule F a) (unitOf F a)) t) :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (a : Aggregation F) (t : Tally) => reflDec (rule F a t)
+
+def tripK : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> (k : Kan s F) -> (t : Tally) -> EqDec ((toKan s r F (fromKan s F k)).0 t) (k.0 t) :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (k : Kan s F) (t : Tally) => reflDec (k.0 t)
+
+def tripKUnit : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> (k : Kan s F) -> (x : Config) -> (0 P : EqDec (F x) (k.0 (orbit x)) -> Type 0) -> P ((toKan s r F (fromKan s F k)).1.0 x) -> P (k.1.0 x) :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (k : Kan s F) (x : Config) (0 P : EqDec (F x) (k.0 (orbit x)) -> Type 0) (v : P ((toKan s r F (fromKan s F k)).1.0 x)) => v
+
+def mkConst : (H : Tally -> Decision) -> Aggregation (fun (x : Config) => H (orbit x)) :=
+  fun (H : Tally -> Decision) => mkAgg (fun (x : Config) => H (orbit x)) H (fun (x : Config) => reflDec (H (orbit x)))
+
+-- Fact 1 (uniq, pointwise): two aggregations of F have the same rule values.
+def fact1 : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> (a1 : Aggregation F) -> (a2 : Aggregation F) -> (t : Tally) -> EqDec (rule F a1 t) (rule F a2 t) :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (a1 : Aggregation F) (a2 : Aggregation F) (t : Tally) =>
+    facAt s r F (rule F a1) (rule F a2) t (unitOf F a1 (s t)) (unitOf F a2 (s t))
+
+-- govX and SelfX are the prelude gov and IsSelfConstituting.
+-- Fact 2: F is self-constituting if and only if F has an aggregation.
+def fact2fwd : (F : ChoiceRule) -> IsSelfConstituting F -> Aggregation F :=
+  fun (F : ChoiceRule) (p : IsSelfConstituting F) => p.0
+
+-- Fact 3: F has an aggregation if and only if F is constant on each orbit.
+def fact3bwd : (s : Tally -> Config) -> (r : (t : Tally) -> EqTally t (orbit (s t))) -> (F : ChoiceRule) -> ((x : Config) -> (y : Config) -> EqTally (orbit x) (orbit y) -> EqDec (F x) (F y)) -> Aggregation F :=
+  fun (s : Tally -> Config) (r : (t : Tally) -> EqTally t (orbit (s t))) (F : ChoiceRule) (c : (x : Config) -> (y : Config) -> EqTally (orbit x) (orbit y) -> EqDec (F x) (F y)) =>
+    mkAgg F (fun (t : Tally) => F (s t)) (fun (x : Config) => c x (s (orbit x)) (r (orbit x)))
+
+def fact2bwd : (F : ChoiceRule) -> Aggregation F -> IsSelfConstituting F :=
+  fun (F : ChoiceRule) (a : Aggregation F) =>
+    (a, fun (x : Config) => symmDec (F x) (rule F a (orbit x)) (unitOf F a x))
+
+def fact3fwd : (F : ChoiceRule) -> (a : Aggregation F) -> (x : Config) -> (y : Config) -> EqTally (orbit x) (orbit y) -> EqDec (F x) (F y) :=
+  fun (F : ChoiceRule) (a : Aggregation F) (x : Config) (y : Config) (h : EqTally (orbit x) (orbit y)) =>
+    transDec (F x) (rule F a (orbit x)) (F y) (unitOf F a x)
+      (transDec (rule F a (orbit x)) (rule F a (orbit y)) (F y) (congTD (rule F a) (orbit x) (orbit y) h)
+        (symmDec (F y) (rule F a (orbit y)) (unitOf F a y)))
