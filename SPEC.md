@@ -1,8 +1,8 @@
 # escrow-lang specification (draft)
 
-Status: draft, milestone M6 done (O2 CLOSED for member classes; section
-10), M7 planned (O14, an action on decisions). M5 gave a proof of section
-4.1 (O1 CLOSED).
+Status: draft, milestone M7 done (O14 CLOSED, the decision flip; section
+10). M6 closed O2 for member classes. M5 gave a proof of section 4.1 (O1
+CLOSED), and M7 gave a proof of the flip fact of section 4.1.
 `escrow-lang` is a working name.
 
 ## 1. Purpose
@@ -168,11 +168,33 @@ not be 0 (`REFUSE_CLASS_ZERO`), and the sum of the sizes must be `members`
 all members (`kcons members knil`). Its table and its compiled output do
 not change.
 
+A program can declare `def decisionFlip : Decision -> Decision :=
+flipDecision` (M7). It is the first definition after `memberClasses`
+(definition 2), or definition 1 when the program has no `memberClasses`.
+The prelude defines `flipDecision`, `swapT3` and `flipTallies` after
+`orbit`. `flipDecision` maps release to refund, refund to release and hold
+to hold. `swapT3` swaps the release count and the refund count of a count
+triple and keeps the hold count. `flipTallies` applies `swapT3` to each
+class tally (structural recursion on `Tallies`). The prelude has no flip on
+`Config` or `Tally`. A flip on `Config` needs a proof that the class totals
+of the flipped ballots equal `members`, by induction on an open list.
+`natAdd` reduces only on literals, and `fold` is the only recursion (O9).
+Thus the proof of the flip fact is in mechanism-lang (section 4.1).
+`escrowc` checks the declaration in the prelude, just after `flipDecision`.
+Its type must convert to `Decision -> Decision`, and its body must map
+release, refund and hold to refund, release and hold. A wrong type, a
+different map, or a `def decisionFlip` at a different position gives
+`REFUSE_FLIP_FORM`. For a program with the declaration, `escrowc table` and
+`escrowc build` also refuse a table that does not commute with the flip
+(`REFUSE_FLIP_TABLE`, section 7). A program without the declaration checks,
+tabulates and builds as before.
+
 The member relabeling group `act` is the product of the symmetric groups
 on the classes (M6). Its orbits are class tallies: one count triple for
 each class. At one class, `act` is the symmetric group on `members`. This
-choice of `act` is mine; the design keeps `act` abstract (open items O2
-and O14). `act` does not act on decisions.
+choice of `act` is mine; the design keeps `act` abstract (open item O2).
+`act` does not act on decisions. The decision flip above is a separate
+check, not a part of `act` (O14 CLOSED, section 9).
 
 ### 4.1 The aggregation at a discrete decision space
 
@@ -247,6 +269,40 @@ The proof has three limits that come from the mechanism-lang checker:
 3. The last field of `Kan n F` quantifies over
    `P : MechEq Decision a b -> Type 0`. Thus `Kan n F` is in `Type 1`.
 
+The flip fact (M7, open item O14 CLOSED). Let `a` be an aggregation of `F`,
+with `L = a.1`. Then `F` commutes with the flip at each configuration
+exactly when `L` commutes with the flip on the image of `orbit`:
+`F (flip x) = flip (F x)` for each `x` exactly when
+`L (flip (orbit x)) = flip (L (orbit x))` for each `x`. The proof uses only
+the factorization of `F` through `L` and the lemma
+`orbit (flip x) = flip (orbit x)`. It does not use a section of `orbit`.
+The table check of section 7 follows from this fact: the table gives `L`
+on the image of `orbit`, and the check tests each row.
+
+The proof is the file `examples/escrow-o14/O14.mech` in the mechanism-lang
+repository at commit `65a474f` (rung 2; section 10). Chunk 0 of M7 ruled
+out rung 1, a proof in escrow-lang: the lemma needs induction, and
+escrow-lang `Nat` has no induction (section 4). `MechNat` has `case` in a
+`def rec`, so the lemma uses induction on the members parameter `n`. To
+check the proof, join `prelude/init.mech`, `examples/escrow-o1/O1.mech` and
+`examples/escrow-o14/O14.mech` with a newline into one file. Then run
+`_bend2/bin/mech.exe check` on that file. The result is exit 0 and no
+output (maximum resident set 9328 KB). `_bend2/bin/mech.exe axioms` on the
+same file gives exit 0 and no output (9408 KB). The file has no hole and
+no axiom. The `README.md` in that directory gives the commands.
+
+| Part | Definitions in `O14.mech` |
+|---|---|
+| The flip on ballots, decisions, configurations and tallies | `flipB`, `flipD`, `flipC`, `flipT` |
+| The flip is an involution on ballots, decisions and tallies | `flipBInv`, `flipDInv`, `flipTInv` |
+| `orbit n (flipC n x) = flipT n (orbit n x)` | `orbitFlip` |
+| The flip fact, in both directions | `flipFwd`, `flipBwd` |
+
+The proof has the limits of the M5 proof. It covers one class: `Tally n`
+is one count triple, as in `O1.mech`. The member classes of M6 are not in
+the proof. The checker has no eta rule for pairs, so the file does not
+state `flipC n (flipC n x) = x`. The flip fact does not need it.
+
 ## 5. Core operations
 
 Each operation has its design meaning and its homomorphism. `gov F L x` is
@@ -316,6 +372,18 @@ of an Arrow-Debreu table. First, more than 1000 members gives `TABLE_LIMIT`
 rows is the bound. One class keeps the 1000-member table limit and
 `EVM_LIMIT`. At 14 members, the trivial group (14 classes of one member)
 and each layout of two classes get `REFUSE_TABLE_SIZE`.
+
+Then, for a program with `def decisionFlip` (section 4), `escrowc table`
+and `escrowc build` check that the table commutes with the flip (M7). The
+flip of a row swaps the release count and the refund count of each class
+and keeps the hold count: in each class, (r, f, h) goes to (f, r, h). The
+flip of a code swaps release (1) and refund (2) and keeps hold (3). For each
+row `t`, the code at the flip of `t` must be the flip of the code at `t`.
+A row that does not obey gives `REFUSE_FLIP_TABLE`, the message names the
+row, and `build` writes no output. Section 4.1 gives the reason: `F`
+commutes with the flip exactly when `L` does on the image of `orbit`.
+`escrowc check` refuses a wrong declaration before this step
+(`REFUSE_FLIP_FORM`, section 4).
 
 - The creation code reverts on a call value and returns the runtime. It
   writes no storage.
@@ -431,7 +499,7 @@ facts are in `probe/CAPABILITY.md`.
   `def memberClasses` (section 4). A program without the declaration has
   one class: the symmetric group on members. The design and the DAO
   example (a `Z2` flip on spins) keep `act` general. An action on the
-  decisions is open item O14.
+  decisions was open item O14 (CLOSED 2026-10-09 by M7).
 - O3. RULED 2026-10-06: `D` stays discrete and the Schelling-Ising row is
   not reachable. The DAO repository finds its fork in the indiscrete target
   `MagPhase`, not a discrete one.
@@ -517,12 +585,18 @@ facts are in `probe/CAPABILITY.md`.
   Thus any caller of `settle` could pick the verdict, for example a payee
   sending `n` release ballots. M4 built the ruling in chunks 1 to 3
   (section 10).
-- O14. OPEN 2026-10-09 (USER ruling at M6 chunk 5: "New open item for an
-  action on decisions"). `act` relabels members only, and `Decision` has
-  no action. The DAO example also flips decisions (a `Z2` flip on spins).
-  escrow-lang has no form for an action on decisions. A design for it
-  needs a USER ruling. M7 plans it (USER ruling 2026-10-09, section 10):
-  an opt-in `Z2` flip, a table check in `escrowc` and a proof.
+- O14. CLOSED 2026-10-09 by M7 (section 10). It was OPEN 2026-10-09 (USER
+  ruling at M6 chunk 5: "New open item for an action on decisions"): `act`
+  relabels members only, and `Decision` had no action. The DAO example
+  also flips decisions (a `Z2` flip on spins). A program can now declare
+  the opt-in `Z2` flip `def decisionFlip` (section 4). `escrowc` refuses a
+  wrong declaration (`REFUSE_FLIP_FORM`) and a declared program whose table
+  does not commute with the flip (`REFUSE_FLIP_TABLE`, section 7). The
+  proof that `F` commutes with the flip exactly when `L` does on the image
+  of `orbit` is rung 2: mechanism-lang commit `65a474f`,
+  `examples/escrow-o14/O14.mech` (section 4.1). The escrow-lang commits:
+  plan `3b42ce2`, chunk 1 `f515f1f`, chunk 2 `28aff21`, chunk 4 `7cfe3d6`.
+  `act` does not change: it relabels members only.
 
 
 ## 10. Milestones
@@ -613,8 +687,9 @@ facts are in `probe/CAPABILITY.md`.
   each, and `council` at 81 vectors. The 14-member build gives 2170 bytes
   and 120 codes. The proof of section 4.1 (M5) is for one class, and M6
   does not extend it. An action on the decisions (the `Z2` flip of the DAO
-  example) is not part of M6 (open item O14).
-- M7: O14, an action on decisions (USER ruling 2026-10-09). Planned. The
+  example) is not part of M6 (open item O14, CLOSED by M7).
+- M7: O14, an action on decisions (USER ruling 2026-10-09). Done
+  (2026-10-09). The
   USER ruling (verbatim): "Z2 flip check + esrow-lang proof (if possible),
   otherwise Z2 flip check + mechanism-lang proof". A program can declare
   the `Z2` flip. The flip swaps `release` and `refund` and keeps `hold`,
@@ -633,4 +708,15 @@ facts are in `probe/CAPABILITY.md`.
   rows; (5) the documents. These do not change: `act`, `orbit`, the table
   rows and their order, the EVM runtime and `amend`. `D` stays discrete
   (O3). A program without the declaration checks, tabulates and builds
-  as before.
+  as before. Chunk 0 ruled rung 2: escrow-lang `Nat` has no induction
+  (section 4.1). The commits: plan `3b42ce2`; chunk 1 `f515f1f`
+  (`flipDecision`, `swapT3`, `flipTallies` and `REFUSE_FLIP_FORM`, section
+  4); chunk 2 `28aff21` (`REFUSE_FLIP_TABLE`, section 7); chunk 3
+  mechanism-lang `65a474f` (`examples/escrow-o14/O14.mech`, section 4.1);
+  chunk 4 `7cfe3d6` (the declaration in `arrow-debreu`, `two-classes` and
+  `council`, which all commute); chunk 5 (the documents: sections 4, 4.1,
+  7, 9 and this section, and `probe/CAPABILITY.md`). `make test` gives 151
+  ok. `test/settlement.py` gives `cases=148 deploy=2`.
+  `test/differential.py` gives 27, 27 and 81 vectors with the M6 codes. The
+  14-member build gives 2170 bytes and 120 codes, and the declaration does
+  not change its runtime (byte-identical).

@@ -71,12 +71,13 @@ The assay probe results P1 to P8 (2026-10-06) are in the git history:
   Ruling 2 keeps the prelude and both example programs unchanged, so
   `escrowc` checks these forms as they are.
 
-## Gates (M4, 2026-10-08; M6 counts, 2026-10-09)
+## Gates (M4, 2026-10-08; M7 counts, 2026-10-09)
 
-- `make`, `make check-clang`, `make test` (parse.sh, check.sh, refusal.sh,
-  normal-forms.py): GREEN, 131 ok at M6.
+- `make`, `make check-clang`, `make test` (flip-form, parse.sh, check.sh,
+  refusal.sh, normal-forms.py; 5 "all passed"): GREEN, 151 ok at M7 (131
+  at M6).
 - `python3 test/settlement.py`: `cases=148 deploy=2 geth=expected OK`
-  (M6, 2026-10-09; M4 had `cases=131`, M2 had `cases=60`).
+  (M6 and M7, 2026-10-09; M4 had `cases=131`, M2 had `cases=60`).
 - `python3 test/differential.py`: `vectors=27
   codes=111123133123222323133323333`. For each vector, each member sends
   one `vote` on claim 0, then the script calls `settle(0)` (M4). `amend`,
@@ -84,7 +85,15 @@ The assay probe results P1 to P8 (2026-10-06) are in the git history:
   verdicts`, and the geth storage after `settle`, apart from the ballots
   word, agrees with `escrowc eval` of source `settle`. M6 adds two
   programs: `test/fixtures/two-classes.esc` (27 vectors, the same codes)
-  and `examples/programs/council.esc` (81 vectors).
+  and `examples/programs/council.esc` (81 vectors). M7 declares
+  `def decisionFlip` in the three programs, and the vectors and codes do
+  not change.
+- Decision flip (M7): `test/mutants/debreu-flip-identity.esc` gives
+  `REFUSE_FLIP_FORM` at `escrowc check`, and
+  `test/mutants/debreu-flip-table.esc` gives `REFUSE_FLIP_TABLE` (row 5)
+  at `escrowc table` and `escrowc build`, with no output file. The
+  14-member Arrow-Debreu build gives 2170 bytes and 120 codes, and the
+  declaration does not change its runtime.
 - Differential mutation check: changing the EVM writer's decision code for
   three release ballots from 1 to 2 fails first at `differential-amend`,
   because geth returns the altered packed table. The later cast check would
